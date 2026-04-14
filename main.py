@@ -1,17 +1,14 @@
 """
 main.py
 DAISY Feature Engineering Agent 진입점
-
-실행 방법:
-  python main.py --mode insight  # AG-02 건너뛰고 AG-04~05만 테스트 (기본값)
-  python main.py --mode test     # EDA만 빠르게
-  python main.py --mode full     # 전체 파이프라인
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import sys
+import time
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -90,11 +87,48 @@ def make_initial_state(mode: str, session_id: str) -> dict:
     return base
 
 
+# ── 스피너 ────────────────────────────────────────────────────────────
+
+class Spinner:
+    """추론 중 표시 + 경과 시간 스피너"""
+
+    FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self, label: str = "추론 중"):
+        self.label     = label
+        self._stop     = threading.Event()
+        self._thread   = None
+        self._start_t  = None
+
+    def start(self, label: str | None = None):
+        if label:
+            self.label = label
+        self._stop.clear()
+        self._start_t = time.time()
+        self._thread  = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def stop(self, result_label: str = "완료"):
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+        elapsed = time.time() - self._start_t if self._start_t else 0
+        # 스피너 줄 지우고 완료 메시지 출력
+        print(f"\r  ✓ {result_label}  ({elapsed:.1f}s)          ")
+
+    def _spin(self):
+        i = 0
+        while not self._stop.is_set():
+            elapsed = time.time() - self._start_t
+            frame   = self.FRAMES[i % len(self.FRAMES)]
+            print(f"\r  {frame} {self.label}  ({elapsed:.1f}s) ...", end="", flush=True)
+            i += 1
+            time.sleep(0.1)
+
+
 # ── HITL 처리 ────────────────────────────────────────────────────────
 
 def handle_hitl(interrupt_value) -> dict:
-    """interrupt() 값에서 메시지 추출 후 터미널 입력 받기"""
-    # interrupt_value는 hitl_interrupt()에서 넘긴 payload dict
     if isinstance(interrupt_value, dict):
         message = interrupt_value.get("message", "확인해주세요.")
         options = interrupt_value.get("options", ["승인", "수정", "재실행"])
@@ -137,69 +171,89 @@ def handle_hitl(interrupt_value) -> dict:
     return {"response": choice, "modified_input": modified_input}
 
 
+# ── 노드 이름 → 한국어 ───────────────────────────────────────────────
+NODE_LABELS = {
+    "orchestrator":      "AG-01  분석 계획 수립",
+    "orchestrator_post": "AG-01  HITL 후 처리",
+    "fe_agent":          "AG-02  Feature Engineering",
+    "sql_agent":         "AG-03  SQL 분석",
+    "insight_agent":     "AG-04  EDA & 인사이트 분석",
+    "report_agent":      "AG-05  보고서 생성",
+    "hitl_plan":         "HITL ①  계획 승인 대기",
+    "hitl_preprocess":   "HITL ②  전처리 확인 대기",
+    "hitl_analysis":     "HITL ③  분석 결과 확인 대기",
+    "hitl_final":        "HITL ④  최종 승인 대기",
+}
+
+
 # ── 메인 실행 ────────────────────────────────────────────────────────
 
 async def run(mode: str = "insight") -> None:
     session_id    = make_session_id()
     config        = make_config(session_id)
     initial_state = make_initial_state(mode, session_id)
+    total_start   = time.time()
 
     print(f"\n{'='*60}")
-    print(f"  DAISY Agent  |  mode: {mode}  |  session: {session_id}")
-    print(f"  요청: {initial_state['user_input']}")
+    print(f"  DAISY Ecommerce Analysis Agent")
+    print(f"  세션  : {session_id}")
+    print(f"  모드  : {mode}")
+    print(f"  요청  : {initial_state['user_input']}")
     if mode in ("insight", "test"):
-        print(f"  [AG-02 건너뜀]")
+        print(f"  [AG-02 건너뜀 — MCP 서버 불필요]")
     print(f"{'='*60}\n")
 
-    # 첫 실행은 initial_state, 이후 HITL 재개는 Command(resume=...)
+    spinner      = Spinner()
     stream_input = initial_state
+    current_node = ""
 
     while True:
-        interrupted    = False
+        interrupted     = False
         interrupt_value = None
 
         async for event in graph.astream(
             stream_input,
             config=config,
-            stream_mode="values",
+            stream_mode="updates",
         ):
-            # 노드 실행 상태 출력
             if "__interrupt__" in event:
-                # interrupt() 발생 — 값 추출
-                interrupts = event["__interrupt__"]
+                spinner.stop(f"{NODE_LABELS.get(current_node, current_node)} 완료") if current_node else None
+                interrupts      = event["__interrupt__"]
                 interrupt_value = interrupts[0].value if interrupts else {}
-                interrupted = True
+                interrupted     = True
                 break
 
-            # 진행 상황 출력
-            for k in ["execution_plan", "agent_results", "final_response"]:
-                v = event.get(k)
-                if not v:
+            # 노드 실행 감지
+            for node_name in event:
+                if node_name.startswith("_"):
                     continue
-                if k == "execution_plan" and isinstance(v, dict) and v.get("stages"):
-                    print(f"  [계획] stages={v['stages']}")
-                if k == "agent_results" and isinstance(v, dict):
-                    for ag, result in v.items():
-                        if isinstance(result, dict) and "error" not in result:
-                            print(f"  ✓ {ag} 완료")
-                if k == "final_response" and v:
-                    print(f"  ✓ 최종 응답 생성됨")
+                if node_name != current_node:
+                    # 이전 노드 완료 표시
+                    if current_node:
+                        spinner.stop(f"{NODE_LABELS.get(current_node, current_node)} 완료")
+                    current_node = node_name
+                    label = NODE_LABELS.get(node_name, node_name)
+                    spinner.start(label)
+
+        if not interrupted and current_node:
+            spinner.stop(f"{NODE_LABELS.get(current_node, current_node)} 완료")
+            current_node = ""
 
         if interrupted and interrupt_value is not None:
             hitl_response = handle_hitl(interrupt_value)
-            # Command(resume=...) 으로 재개
-            stream_input = Command(resume=hitl_response)
+            stream_input  = Command(resume=hitl_response)
+            current_node  = ""
             continue
 
-        # 그래프 완료
         break
 
     # ── 결과 출력 ────────────────────────────────────────────────────
-    final        = graph.get_state(config)
-    state_values = final.values if hasattr(final, "values") else {}
+    total_elapsed = time.time() - total_start
+    final         = graph.get_state(config)
+    state_values  = final.values if hasattr(final, "values") else {}
 
     print(f"\n{'='*60}")
-    print("  분석 완료")
+    print(f"  분석 완료  (총 소요시간: {total_elapsed:.1f}s)")
     print(f"{'='*60}")
 
     if resp := state_values.get("final_response", ""):
@@ -209,7 +263,8 @@ async def run(mode: str = "insight") -> None:
         report_path = ag05.get("report_path", "")
         print(f"\n[보고서] {report_path if report_path else '생성 실패'}")
 
-    print(f"\n[로그]  logs/sessions/{session_id}/trace.md")
+    print(f"\n[LangSmith] https://smith.langchain.com")
+    print(f"[로그]  logs/sessions/{session_id}/trace.md")
     print(f"[DB]    data/agent_trace.db\n")
 
 

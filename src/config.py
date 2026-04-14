@@ -13,8 +13,8 @@ load_dotenv()  # .env 파일 로드
 ROOT_DIR   = Path(__file__).resolve().parent.parent   # agent_dev/
 SRC_DIR    = ROOT_DIR / "src"                          # agent_dev/src/
 MCP_DIR    = ROOT_DIR / "mcp_claude" / "integrated"   # MCP 서버 경로
-DATA_DIR   = MCP_DIR / "data"                          # MCP 원본 데이터
-OUTPUT_DIR = DATA_DIR / "output"                       # MCP 파이프라인 출력
+DATA_DIR   = ROOT_DIR / "mcp_claude" / "data"           # MCP 원본 데이터
+OUTPUT_DIR = ROOT_DIR / "mcp_claude" / "data" / "output"  # MCP 파이프라인 출력
 
 # ── 세션 디렉토리 ────────────────────────────────────────────────────
 # 세션별 로그·캐시·차트·보고서 저장
@@ -30,3 +30,8 @@ MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000/sse")
 
 # ── 데이터 기본값 ────────────────────────────────────────────────────
 DEFAULT_TARGET_COL = "TARGET"
+
+# LangSmith
+os.environ["LANGCHAIN_API_KEY"]      = os.getenv("LANGCHAIN_API_KEY", "")
+os.environ["LANGCHAIN_TRACING_V2"]   = os.getenv("LANGCHAIN_TRACING_V2", "false")
+os.environ["LANGCHAIN_PROJECT"]      = os.getenv("LANGCHAIN_PROJECT", "ecommerce-analysis-agent")
