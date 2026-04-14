@@ -1,10 +1,14 @@
-# Python-generated files
+.venv/
+.env
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
+*.pyc
+*.pickle
+*.pkl
+*.db
+logs/
+sessions/
+data/agent_trace.db
+.DS_Store
+.vscode/
+mcp_claude/integrated/pyarmor_runtime_000000/
+mcp_claude/integrated/__pycache__/
