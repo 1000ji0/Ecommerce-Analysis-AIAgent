@@ -1,0 +1,67 @@
+[project]
+name = "agent-dev"
+version = "0.1.0"
+description = "DAISY Feature Engineering Agent — LangGraph + Gemini 2.5 Flash"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # ── 기존 유지 ────────────────────────────────────────────────────
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.4",
+    "pandas>=3.0.1",
+    "plotly>=6.6.0",
+    "scikit-learn>=1.8.0",
+    "seaborn>=0.13.2",
+
+
+    # ── LangGraph / LangChain ────────────────────────────────────────
+    "langgraph>=0.2.73",
+    "langchain-core>=0.3.0",
+    "langchain-google-genai>=2.1.0",
+    "langchain-community>=0.3.0",
+    "langchain-mcp-adapters>=0.1.0",
+
+    # ── MCP 클라이언트 ───────────────────────────────────────────────
+    "mcp>=1.6.0",
+    "httpx>=0.27.0",
+    "httpx-sse>=0.4.0",
+
+    # ── 메모리 ───────────────────────────────────────────────────────
+    "chromadb>=0.6.0",
+    "sqlalchemy>=2.0.0",
+
+    # ── 데이터 처리 추가 ─────────────────────────────────────────────
+    "openpyxl>=3.1.0",
+    "lightgbm>=4.3.0",
+
+    # ── 보고서 생성 ──────────────────────────────────────────────────
+    "weasyprint>=62.0",
+
+    # ── API 서버 ─────────────────────────────────────────────────────
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+
+    # ── 유틸리티 ─────────────────────────────────────────────────────
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.0.0",
+    "aiofiles>=23.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/daisy"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
