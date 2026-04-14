@@ -12,3 +12,5 @@ data/agent_trace.db
 .vscode/
 mcp_claude/integrated/pyarmor_runtime_000000/
 mcp_claude/integrated/__pycache__/
+data/uploads/
+data/sample/*.csv

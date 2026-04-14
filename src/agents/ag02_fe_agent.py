@@ -1,7 +1,10 @@
 """
 AG-02 Feature Engineering Agent
-USE_MCP_MOCK=true  → 샘플 데이터 사용 (MCP 서버 불필요)
-USE_MCP_MOCK=false → 실제 MCP 서버 연결
+MCP T-01~T-07 파이프라인 실행
+
+세션별 독립 output 디렉토리 사용:
+  sessions/{session_id}/output/ 에 결과 저장
+  → 세션간 데이터 충돌 없음
 """
 from __future__ import annotations
 
@@ -13,13 +16,13 @@ from typing import Any
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import MCP_SERVER_URL, OUTPUT_DIR, DEFAULT_TARGET_COL
+from config import MCP_SERVER_URL, DATA_DIR, DEFAULT_TARGET_COL, get_session_output_dir
 from state import GraphState
 from tools.data.t21_feature_cache import get_cache, set_cache
 from tools.output.t20_trace_logger import log_tool_call
 from tools.database.sqlite_store import TraceStore
 
-_store  = TraceStore()
+_store   = TraceStore()
 USE_MOCK = os.getenv("USE_MCP_MOCK", "true").lower() == "true"
 
 
@@ -29,15 +32,44 @@ async def fe_agent_node(state: GraphState) -> dict[str, Any]:
     plan        = state.get("execution_plan", {})
     ag02_params = plan.get("params", {}).get("AG-02", {})
 
+    # 세션별 output 디렉토리 생성
+    session_output = get_session_output_dir(session_id)
+
     if USE_MOCK:
-        return await _run_mock(state, session_id, ag02_params)
+        return await _run_mock(state, session_id, ag02_params, session_output)
     else:
-        return await _run_mcp(state, session_id, data_meta, ag02_params)
+        return await _run_mcp(state, session_id, data_meta, ag02_params, session_output)
 
 
-async def _run_mock(state, session_id, ag02_params) -> dict[str, Any]:
-    """MCP 서버 없이 기존 샘플 데이터 사용"""
-    log_tool_call(session_id, "AG-02_MOCK", {}, {"output_dir": str(OUTPUT_DIR)})
+async def _run_mock(
+    state: GraphState,
+    session_id: str,
+    ag02_params: dict,
+    session_output: Path,
+) -> dict[str, Any]:
+    """
+    MCP 서버 없이 기존 샘플 데이터 사용
+    샘플 pickle 파일을 session output으로 복사해서 사용
+    """
+    import shutil
+    from config import DATA_DIR
+
+    # 기존 샘플 output 파일들을 세션 output으로 복사
+    sample_output = DATA_DIR / "output"
+    copied = []
+
+    if sample_output.exists():
+        for f in sample_output.glob("*.pickle"):
+            dest = session_output / f.name
+            shutil.copy2(f, dest)
+            copied.append(f.name)
+
+    log_tool_call(
+        session_id=session_id,
+        tool_name="AG-02_MOCK",
+        params={"session_output": str(session_output)},
+        result={"copied_files": copied, "output_dir": str(session_output)},
+    )
 
     mock_stages = [
         ("T-01_implement_fc",          {"exec_tools": ag02_params.get("exec_tools", ["fpca"])}),
@@ -48,14 +80,16 @@ async def _run_mock(state, session_id, ag02_params) -> dict[str, Any]:
         ("T-07_select_best_model",     {"ncol": ag02_params.get("ncol", 10)}),
     ]
     for tool_name, params in mock_stages:
-        log_tool_call(session_id, f"MOCK_{tool_name}", params, {"status": "mock"})
+        log_tool_call(session_id, f"MOCK_{tool_name}", params,
+                      {"status": "mock", "output_dir": str(session_output)})
         import asyncio; await asyncio.sleep(0.05)
 
     result = {
-        "output_path": str(OUTPUT_DIR),
-        "output_dir":  str(OUTPUT_DIR),
-        "mode":        "mock",
-        "stages_done": [s[0] for s in mock_stages],
+        "output_path":  str(session_output),
+        "output_dir":   str(session_output),
+        "mode":         "mock",
+        "copied_files": copied,
+        "stages_done":  [s[0] for s in mock_stages],
     }
     log_tool_call(session_id, "AG-02_complete", {}, result)
 
@@ -64,56 +98,67 @@ async def _run_mock(state, session_id, ag02_params) -> dict[str, Any]:
     return {"agent_results": current, "hitl_required": True}
 
 
-async def _run_mcp(state, session_id, data_meta, ag02_params) -> dict[str, Any]:
-    """실제 MCP 서버 연결 — langchain-mcp-adapters 0.1.0+ 방식"""
+async def _run_mcp(
+    state: GraphState,
+    session_id: str,
+    data_meta: dict,
+    ag02_params: dict,
+    session_output: Path,
+) -> dict[str, Any]:
+    """실제 MCP 서버 연결 — 세션별 output 경로 사용"""
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
+    data_path  = data_meta.get("path", "")
     target_col = ag02_params.get("target_col", DEFAULT_TARGET_COL)
-    output_dir = str(OUTPUT_DIR)
+    output_dir = str(session_output)
 
-    # 0.1.0+ 방식: async with 대신 직접 get_tools() 호출
     client    = MultiServerMCPClient({"analytics": {"url": MCP_SERVER_URL, "transport": "sse"}})
     mcp_tools = {t.name: t for t in await client.get_tools()}
 
     exec_tools  = ag02_params.get("exec_tools", ["fpca", "nds", "timeseries", "stats"])
-    cached_path = get_cache(session_id, data_meta.get("path", ""), exec_tools)
+    cached_path = get_cache(session_id, data_path, exec_tools)
 
     if cached_path:
         log_tool_call(session_id, "T-01_CACHE_HIT", {}, {"cached": cached_path})
     else:
         await _call(session_id, mcp_tools, "implement_fc",
-                    {"data_dir": data_meta.get("path", ""), "exec_tools": exec_tools})
+                    {"data_dir": data_path, "exec_tools": exec_tools})
 
+    # 각 단계 output을 session_output 경로로 지정
     await _call(session_id, mcp_tools, "delete_outlier", {
-        "data_path": str(OUTPUT_DIR / "feature_data_common.pickle"),
-        "target": target_col,
+        "data_path":      str(session_output / "feature_data_common.pickle"),
+        "target":         target_col,
         "outlier_method": ag02_params.get("outlier_method", "gaussian"),
     })
     await _call(session_id, mcp_tools, "smart_correlation", {
-        "data_path": str(OUTPUT_DIR / "feature_data_outlier.pickle"),
+        "data_path":  str(session_output / "feature_data_outlier.pickle"),
         "target_col": target_col,
-        "threshold": ag02_params.get("threshold", 0.8),
+        "threshold":  ag02_params.get("threshold", 0.8),
     })
     await _call(session_id, mcp_tools, "gaussian_augmentation", {
-        "data_path": str(OUTPUT_DIR / "feature_data_multi.pickle"),
-        "time_path": str(OUTPUT_DIR.parent / "time_info.csv"),
-        "ycol": target_col,
+        "data_path":     str(session_output / "feature_data_multi.pickle"),
+        "time_path":     str(DATA_DIR / "time_info.csv"),
+        "ycol":          target_col,
         "n_new_samples": ag02_params.get("n_new_samples", 300),
     })
     await _call(session_id, mcp_tools, "rank_matrix", {
-        "data_path": str(OUTPUT_DIR / "feature_data_augmentation.pickle"),
-        "fold": ag02_params.get("fold", 1),
+        "data_path": str(session_output / "feature_data_augmentation.pickle"),
+        "fold":      ag02_params.get("fold", 1),
     })
     model_output = await _call(session_id, mcp_tools, "select_best_model", {
         "data_path": output_dir,
-        "train": str(OUTPUT_DIR / "wu_train_sample.pickle"),
-        "test":  str(OUTPUT_DIR / "wu_test_sample.pickle"),
-        "ncol":  ag02_params.get("ncol", 10),
+        "train":     str(session_output / "wu_train_sample.pickle"),
+        "test":      str(session_output / "wu_test_sample.pickle"),
+        "ncol":      ag02_params.get("ncol", 10),
         "criterion": ag02_params.get("criterion", "MSE"),
     })
 
-    result = {"output_path": output_dir, "output_dir": output_dir,
-              "mode": "mcp", "model_result": model_output}
+    result = {
+        "output_path":  output_dir,
+        "output_dir":   output_dir,
+        "mode":         "mcp",
+        "model_result": model_output,
+    }
     log_tool_call(session_id, "AG-02_complete", {}, result)
 
     current = state.get("agent_results", {})

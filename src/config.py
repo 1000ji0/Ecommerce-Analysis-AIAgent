@@ -1,25 +1,54 @@
 """
 전역 설정
 모든 파일이 from config import ... 로 가져다 씀
-경로·모델명·API키 등 한 곳에서 관리
 """
 from pathlib import Path
 from dotenv import load_dotenv
 import os
 
-load_dotenv()  # .env 파일 로드
+load_dotenv()
 
 # ── 프로젝트 경로 ────────────────────────────────────────────────────
 ROOT_DIR   = Path(__file__).resolve().parent.parent   # agent_dev/
-SRC_DIR    = ROOT_DIR / "src"                          # agent_dev/src/
-MCP_DIR    = ROOT_DIR / "mcp_claude" / "integrated"   # MCP 서버 경로
-DATA_DIR   = ROOT_DIR / "mcp_claude" / "data"           # MCP 원본 데이터
-OUTPUT_DIR = ROOT_DIR / "mcp_claude" / "data" / "output"  # MCP 파이프라인 출력
+SRC_DIR    = ROOT_DIR / "src"
+MCP_DIR    = ROOT_DIR / "mcp_claude" / "integrated"
+MCP_DATA_DIR = ROOT_DIR / "mcp_claude" / "data"       # MCP 원본 데이터
+OUTPUT_DIR   = MCP_DATA_DIR / "output"                 # MCP 기본 output (참조용)
+
+# ── 사용자 데이터 관리 폴더 ──────────────────────────────────────────
+USER_DATA_DIR   = ROOT_DIR / "data"
+SAMPLE_DATA_DIR = ROOT_DIR / "data" / "sample"
+UPLOAD_DATA_DIR = ROOT_DIR / "data" / "uploads"
+
+SAMPLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── 하위 호환성 유지 ─────────────────────────────────────────────────
+# 기존 코드에서 DATA_DIR을 쓰는 곳이 있으면 SAMPLE_DATA_DIR로 연결
+DATA_DIR = SAMPLE_DATA_DIR
 
 # ── 세션 디렉토리 ────────────────────────────────────────────────────
-# 세션별 로그·캐시·차트·보고서 저장
 SESSION_DIR = ROOT_DIR / "sessions"
 SESSION_DIR.mkdir(exist_ok=True)
+
+
+def get_session_output_dir(session_id: str) -> Path:
+    """
+    세션별 독립 output 디렉토리 반환
+    각 세션의 FE 파이프라인 결과가 서로 섞이지 않도록 분리
+
+    구조:
+        sessions/{session_id}/
+            ├── output/    ← FE 파이프라인 결과 (pickle 등)
+            ├── charts/    ← 시각화 이미지
+            ├── reports/   ← PDF/CSV 보고서
+            ├── cache/     ← 피처 캐시
+            └── trace.md   ← 실행 로그
+    """
+    path = SESSION_DIR / session_id / "output"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 # ── LLM 설정 ─────────────────────────────────────────────────────────
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
@@ -31,7 +60,7 @@ MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000/sse")
 # ── 데이터 기본값 ────────────────────────────────────────────────────
 DEFAULT_TARGET_COL = "TARGET"
 
-# LangSmith
-os.environ["LANGCHAIN_API_KEY"]      = os.getenv("LANGCHAIN_API_KEY", "")
-os.environ["LANGCHAIN_TRACING_V2"]   = os.getenv("LANGCHAIN_TRACING_V2", "false")
-os.environ["LANGCHAIN_PROJECT"]      = os.getenv("LANGCHAIN_PROJECT", "ecommerce-analysis-agent")
+# ── LangSmith ────────────────────────────────────────────────────────
+os.environ["LANGCHAIN_API_KEY"]    = os.getenv("LANGCHAIN_API_KEY", "")
+os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGCHAIN_TRACING_V2", "false")
+os.environ["LANGCHAIN_PROJECT"]    = os.getenv("LANGCHAIN_PROJECT", "ecommerce-analysis-agent")

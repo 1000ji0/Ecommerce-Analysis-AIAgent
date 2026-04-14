@@ -1,6 +1,14 @@
 """
-main.py
-DAISY Feature Engineering Agent 진입점
+main.py — 대화형 에이전트 진입점
+
+실행:
+  python main.py --file data/sample/ecommerce_sample.csv
+
+대화 예시:
+  > 피처 중요도 뽑아줘
+  > EDA 시각화 만들어줘
+  > 전체 분석해줘
+  > exit
 """
 from __future__ import annotations
 
@@ -15,113 +23,78 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from config import OUTPUT_DIR, DATA_DIR
+from config import SAMPLE_DATA_DIR, get_session_output_dir
 from graph import graph
 from langgraph.types import Command
 
 
-# ── 샘플 데이터 ──────────────────────────────────────────────────────
-SAMPLE_CSV  = DATA_DIR / "pivoted_data_sample.csv"
-SAMPLE_META = {
-    "path":      str(SAMPLE_CSV),
-    "filename":  "pivoted_data_sample.csv",
-    "encoding":  "utf-8",
-    "row_count": 100,
-    "col_count": 50,
-    "size_mb":   0.5,
-    "preview": {
-        "columns": ["TARGET", "feature_1", "feature_2"],
-        "dtypes":  {"TARGET": "float64", "feature_1": "float64"},
-        "sample":  [],
-    },
-}
+# ── 데이터 로드 ──────────────────────────────────────────────────────
 
-AG02_SKIP_RESULT = {
-    "AG-02": {
-        "output_path": str(OUTPUT_DIR),
-        "output_dir":  str(OUTPUT_DIR),
-        "mode":        "skipped",
-        "stages_done": [],
+def _make_data_meta(file_path: Path) -> dict:
+    import pandas as pd
+    encoding = "utf-8"
+    for enc in ["utf-8", "utf-8-sig", "euc-kr", "cp949"]:
+        try:
+            df = pd.read_csv(file_path, nrows=5, encoding=enc)
+            encoding = enc
+            break
+        except Exception:
+            continue
+
+    df = pd.read_csv(file_path, nrows=5, encoding=encoding)
+    with open(file_path, "r", encoding=encoding, errors="ignore") as f:
+        row_count = max(0, sum(1 for _ in f) - 1)
+
+    return {
+        "path":      str(file_path),
+        "filename":  file_path.name,
+        "encoding":  encoding,
+        "row_count": row_count,
+        "col_count": len(df.columns),
+        "size_mb":   round(file_path.stat().st_size / (1024 * 1024), 2),
+        "preview": {
+            "columns": list(df.columns),
+            "dtypes":  {col: str(dtype) for col, dtype in df.dtypes.items()},
+            "sample":  df.head(2).to_dict(orient="records"),
+        },
     }
-}
 
 
 def make_session_id() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
 
 
-def make_config(session_id: str) -> dict:
-    return {"configurable": {"thread_id": session_id}}
-
-
-def make_initial_state(mode: str, session_id: str) -> dict:
-    prompts = {
-        "full":    "샘플 데이터로 전체 분석 파이프라인 실행해줘.",
-        "insight": "샘플 데이터로 EDA, 변수 중요도 분석, 인사이트 도출하고 PDF 보고서 만들어줘.",
-        "test":    "데이터 EDA만 빠르게 해줘.",
-    }
-
-    base = {
-        "session_id":     session_id,
-        "user_input":     prompts.get(mode, prompts["insight"]),
-        "data_meta":      SAMPLE_META,
-        "agent_results":  {},
-        "hitl_history":   [],
-        "hitl_required":  False,
-        "messages":       [],
-        "execution_plan": {},
-        "final_response": "",
-    }
-
-    if mode in ("insight", "test"):
-        base["agent_results"] = AG02_SKIP_RESULT
-        base["execution_plan"] = {
-            "stages":      ["AG-04", "AG-05"],
-            "params": {
-                "AG-04": {"top_n": 5, "target_col": "TARGET"},
-                "AG-05": {"format": "pdf"},
-            },
-            "description": "EDA + 인사이트 + 보고서 생성 (AG-02 건너뜀)",
-        }
-
-    return base
-
-
 # ── 스피너 ────────────────────────────────────────────────────────────
 
 class Spinner:
-    """추론 중 표시 + 경과 시간 스피너"""
-
     FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-    def __init__(self, label: str = "추론 중"):
-        self.label     = label
-        self._stop     = threading.Event()
-        self._thread   = None
-        self._start_t  = None
+    def __init__(self):
+        self._stop    = threading.Event()
+        self._thread  = None
+        self._start_t = None
+        self._label   = ""
 
-    def start(self, label: str | None = None):
-        if label:
-            self.label = label
+    def start(self, label: str):
+        self._label = label
         self._stop.clear()
         self._start_t = time.time()
         self._thread  = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
 
-    def stop(self, result_label: str = "완료"):
+    def stop(self):
         self._stop.set()
         if self._thread:
             self._thread.join()
         elapsed = time.time() - self._start_t if self._start_t else 0
-        # 스피너 줄 지우고 완료 메시지 출력
-        print(f"\r  ✓ {result_label}  ({elapsed:.1f}s)          ")
+        print(f"\r  ✓ {self._label} 완료  ({elapsed:.1f}s)                    ")
 
     def _spin(self):
         i = 0
         while not self._stop.is_set():
             elapsed = time.time() - self._start_t
             frame   = self.FRAMES[i % len(self.FRAMES)]
-            print(f"\r  {frame} {self.label}  ({elapsed:.1f}s) ...", end="", flush=True)
+            print(f"\r  {frame} {self._label} 중...  ({elapsed:.1f}s)", end="", flush=True)
             i += 1
             time.sleep(0.1)
 
@@ -135,108 +108,121 @@ def handle_hitl(interrupt_value) -> dict:
         context = interrupt_value.get("context", {})
         point   = interrupt_value.get("hitl_point", "")
     else:
-        message = str(interrupt_value)
-        options = ["승인", "수정", "재실행"]
-        context = {}
-        point   = ""
+        message, options, context, point = str(interrupt_value), ["승인", "수정", "재실행"], {}, ""
 
-    print("\n" + "="*60)
-    print(f"[HITL] {point}")
-    print(f"  {message}")
+    print("\n" + "─"*50)
+    print(f"[{point}]  {message}")
     if context:
         import json
-        print("\n  [컨텍스트]")
         for k, v in context.items():
-            v_str = json.dumps(v, ensure_ascii=False)[:200] if isinstance(v, (dict, list)) else str(v)
-            print(f"    {k}: {v_str}")
-    print(f"\n  선택지: {' / '.join(f'{i+1}.{o}' for i, o in enumerate(options))}")
-    print("="*60)
+            v_str = json.dumps(v, ensure_ascii=False)[:150] if isinstance(v, (dict, list)) else str(v)
+            print(f"  {k}: {v_str}")
+    print(f"  선택: {' / '.join(f'{i+1}.{o}' for i, o in enumerate(options))}")
+    print("─"*50)
 
     while True:
-        choice = input("  선택: ").strip()
+        choice = input("  > ").strip()
         if choice.isdigit() and 1 <= int(choice) <= len(options):
             choice = options[int(choice) - 1]
         if choice in options:
             break
-        print(f"  다시 선택하세요: {options}")
+        print(f"  다시 입력하세요: {options}")
 
     modified_input = {}
     if choice == "수정":
-        print("\n  수정 내용 입력:")
-        text = input("  > ").strip()
+        text = input("  수정 내용: ").strip()
         if text:
             modified_input = {"user_input": text}
 
-    print(f"\n  → '{choice}' 선택됨\n")
+    print(f"  → {choice}\n")
     return {"response": choice, "modified_input": modified_input}
 
 
-# ── 노드 이름 → 한국어 ───────────────────────────────────────────────
-NODE_LABELS = {
-    "orchestrator":      "AG-01  분석 계획 수립",
-    "orchestrator_post": "AG-01  HITL 후 처리",
-    "fe_agent":          "AG-02  Feature Engineering",
-    "sql_agent":         "AG-03  SQL 분석",
-    "insight_agent":     "AG-04  EDA & 인사이트 분석",
-    "report_agent":      "AG-05  보고서 생성",
-    "hitl_plan":         "HITL ①  계획 승인 대기",
-    "hitl_preprocess":   "HITL ②  전처리 확인 대기",
-    "hitl_analysis":     "HITL ③  분석 결과 확인 대기",
-    "hitl_final":        "HITL ④  최종 승인 대기",
-}
+# ── 단일 턴 실행 ─────────────────────────────────────────────────────
 
+async def run_turn(
+    user_input: str,
+    session_id: str,
+    data_meta: dict,
+    config: dict,
+    agent_results: dict,
+    is_first: bool,
+) -> dict:
+    """
+    사용자 메시지 한 턴 처리
+    HITL interrupt 발생 시 처리 후 재개
+    Returns: 업데이트된 agent_results
+    """
+    spinner = Spinner()
 
-# ── 메인 실행 ────────────────────────────────────────────────────────
+    state = {
+        "session_id":     session_id,
+        "user_input":     user_input,
+        "data_meta":      data_meta,
+        "agent_results":  agent_results,
+        "hitl_history":   [],
+        "hitl_required":  False,
+        "messages":       [],
+        "execution_plan": {},
+        "final_response": "",
+        "next_agent":     "",
+        "current_agent":  "",
+    }
 
-async def run(mode: str = "insight") -> None:
-    session_id    = make_session_id()
-    config        = make_config(session_id)
-    initial_state = make_initial_state(mode, session_id)
-    total_start   = time.time()
+    stream_input = state
+    final_response = ""
 
-    print(f"\n{'='*60}")
-    print(f"  DAISY Ecommerce Analysis Agent")
-    print(f"  세션  : {session_id}")
-    print(f"  모드  : {mode}")
-    print(f"  요청  : {initial_state['user_input']}")
-    if mode in ("insight", "test"):
-        print(f"  [AG-02 건너뜀 — MCP 서버 불필요]")
-    print(f"{'='*60}\n")
+    NODE_LABELS = {
+        "orchestrator":         "의도 파악",
+        "orchestrator_respond": "응답 생성",
+        "fe_agent":             "FE 파이프라인",
+        "sql_agent":            "SQL 분석",
+        "insight_agent":        "데이터 분석",
+        "report_agent":         "보고서 생성",
+        "hitl_plan":            "계획 확인 대기",
+        "hitl_preprocess":      "전처리 확인 대기",
+        "hitl_analysis":        "분석 확인 대기",
+        "hitl_final":           "최종 확인 대기",
+    }
 
-    spinner      = Spinner()
-    stream_input = initial_state
     current_node = ""
 
     while True:
         interrupted     = False
         interrupt_value = None
 
-        async for event in graph.astream(
-            stream_input,
-            config=config,
-            stream_mode="updates",
-        ):
+        async for event in graph.astream(stream_input, config=config, stream_mode="updates"):
             if "__interrupt__" in event:
-                spinner.stop(f"{NODE_LABELS.get(current_node, current_node)} 완료") if current_node else None
+                if current_node:
+                    spinner.stop()
+                    current_node = ""
                 interrupts      = event["__interrupt__"]
                 interrupt_value = interrupts[0].value if interrupts else {}
                 interrupted     = True
                 break
 
-            # 노드 실행 감지
-            for node_name in event:
+            for node_name, node_output in event.items():
                 if node_name.startswith("_"):
                     continue
+
+                # 스피너 전환
                 if node_name != current_node:
-                    # 이전 노드 완료 표시
                     if current_node:
-                        spinner.stop(f"{NODE_LABELS.get(current_node, current_node)} 완료")
+                        spinner.stop()
                     current_node = node_name
                     label = NODE_LABELS.get(node_name, node_name)
-                    spinner.start(label)
+                    if node_name not in ("hitl_plan", "hitl_preprocess", "hitl_analysis", "hitl_final"):
+                        spinner.start(label)
+
+                # 응답 수집
+                if isinstance(node_output, dict):
+                    if node_output.get("final_response"):
+                        final_response = node_output["final_response"]
+                    if node_output.get("agent_results"):
+                        agent_results = node_output["agent_results"]
 
         if not interrupted and current_node:
-            spinner.stop(f"{NODE_LABELS.get(current_node, current_node)} 완료")
+            spinner.stop()
             current_node = ""
 
         if interrupted and interrupt_value is not None:
@@ -247,33 +233,80 @@ async def run(mode: str = "insight") -> None:
 
         break
 
-    # ── 결과 출력 ────────────────────────────────────────────────────
-    total_elapsed = time.time() - total_start
-    final         = graph.get_state(config)
-    state_values  = final.values if hasattr(final, "values") else {}
+    # 최종 응답 출력
+    if final_response:
+        print(f"\n🤖  {final_response}\n")
 
-    print(f"\n{'='*60}")
-    print(f"  분석 완료  (총 소요시간: {total_elapsed:.1f}s)")
-    print(f"{'='*60}")
+    return agent_results
 
-    if resp := state_values.get("final_response", ""):
-        print(f"\n[응답]\n{resp}")
 
-    if ag05 := state_values.get("agent_results", {}).get("AG-05", {}):
-        report_path = ag05.get("report_path", "")
-        print(f"\n[보고서] {report_path if report_path else '생성 실패'}")
+# ── 메인 대화 루프 ───────────────────────────────────────────────────
 
-    print(f"\n[LangSmith] https://smith.langchain.com")
-    print(f"[로그]  logs/sessions/{session_id}/trace.md")
-    print(f"[DB]    data/agent_trace.db\n")
+async def chat(file_path: Path) -> None:
+    if not file_path.exists():
+        print(f"\n[오류] 파일 없음: {file_path}")
+        print(f"  data/sample/ 폴더에 CSV 파일을 넣어주세요.\n")
+        return
 
+    session_id    = make_session_id()
+    config        = {"configurable": {"thread_id": session_id}}
+    data_meta     = _make_data_meta(file_path)
+    agent_results = {}
+
+    print(f"\n{'='*55}")
+    print(f"  DAISY Ecommerce Analysis Agent")
+    print(f"  파일  : {file_path.name}")
+    print(f"  컬럼  : {data_meta['row_count']}행 × {data_meta['col_count']}컬럼")
+    print(f"  컬럼명: {data_meta['preview']['columns']}")
+    print(f"{'='*55}")
+    print(f"  무엇을 분석할까요? (종료: exit)")
+    print(f"  예시: 피처 중요도 뽑아줘 / EDA 해줘 / 전체 분석해줘\n")
+
+    turn = 0
+    while True:
+        try:
+            user_input = input("👤  ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n\n  세션 종료.\n")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit", "종료", "끝"):
+            print(f"\n  분석 완료. 세션: {session_id}\n")
+            break
+
+        turn += 1
+        print()
+        agent_results = await run_turn(
+            user_input=user_input,
+            session_id=session_id,
+            data_meta=data_meta,
+            config=config,
+            agent_results=agent_results,
+            is_first=(turn == 1),
+        )
+
+
+# ── 진입점 ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="DAISY Agent")
+    parser = argparse.ArgumentParser(description="DAISY Ecommerce Analysis Agent")
     parser.add_argument(
-        "--mode",
-        choices=["full", "insight", "test"],
-        default="insight",
+        "--file",
+        type=str,
+        default=None,
+        help="분석할 CSV 파일 경로 (기본값: data/sample/ 첫 번째 파일)",
     )
     args = parser.parse_args()
-    asyncio.run(run(mode=args.mode))
+
+    if args.file:
+        fp = Path(args.file)
+    else:
+        csvs = list(SAMPLE_DATA_DIR.glob("*.csv"))
+        if not csvs:
+            print("\n[오류] data/sample/ 에 CSV 파일이 없습니다.")
+            sys.exit(1)
+        fp = csvs[0]
+
+    asyncio.run(chat(fp))
