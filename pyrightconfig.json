@@ -2,7 +2,9 @@
   "pythonVersion": "3.12",
   "pythonPlatform": "Darwin",
   "extraPaths": [
-    "src"
+    "src",
+    "./src/tools",
+    "./src/tools"
   ],
   "venvPath": ".",
   "venv": ".venv"
