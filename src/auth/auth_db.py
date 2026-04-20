@@ -56,6 +56,16 @@ def init_db() -> None:
                 created_at  TEXT    NOT NULL,
                 updated_at  TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS signup_requests (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL,
+                email       TEXT    UNIQUE NOT NULL,
+                message     TEXT,
+                status      TEXT    NOT NULL DEFAULT 'pending',
+                created_at  TEXT    NOT NULL,
+                reviewed_at TEXT
+            );
         """)
 
     # 초기 admin 계정 생성 (없을 때만)
@@ -216,6 +226,74 @@ def get_all_sessions() -> list[dict]:
             ORDER BY s.created_at DESC
         """).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── 가입 요청 CRUD ──────────────────────────────────────────────────
+
+def create_signup_request(name: str, email: str, message: str = "") -> bool:
+    """가입 요청 생성 — 이미 있으면 False"""
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                "INSERT INTO signup_requests (name, email, message, status, created_at) "
+                "VALUES (?, ?, ?, 'pending', ?)",
+                (name, email.strip().lower(), message, _now()),
+            )
+        return True
+    except Exception:
+        return False
+
+
+def get_signup_requests(status: str = "pending") -> list[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM signup_requests WHERE status = ? ORDER BY created_at DESC",
+            (status,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_signup_requests() -> list[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM signup_requests ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def approve_signup_request(request_id: int, temp_password: str) -> Optional[dict]:
+    """가입 요청 승인 → 사용자 계정 생성"""
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM signup_requests WHERE id = ?", (request_id,)
+        ).fetchone()
+    if not row:
+        return None
+    req = dict(row)
+
+    # 계정 생성
+    user = create_user(
+        email=req["email"],
+        password=temp_password,
+        name=req["name"],
+        role="user",
+    )
+
+    # 요청 상태 업데이트
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE signup_requests SET status = 'approved', reviewed_at = ? WHERE id = ?",
+            (_now(), request_id),
+        )
+    return user
+
+
+def reject_signup_request(request_id: int) -> None:
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE signup_requests SET status = 'rejected', reviewed_at = ? WHERE id = ?",
+            (_now(), request_id),
+        )
 
 
 def _now() -> str:

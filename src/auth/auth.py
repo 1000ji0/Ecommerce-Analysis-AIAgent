@@ -15,6 +15,7 @@ from auth.auth_db import (
     get_user_by_email,
     verify_password,
     update_last_login,
+    create_signup_request,
 )
 
 
@@ -74,29 +75,77 @@ def logout() -> None:
 
 
 def render_login_page() -> None:
-    """로그인 페이지 렌더링"""
+    """로그인 / 가입 요청 페이지 렌더링"""
+    # CSS
     st.markdown("""
-    <div style="text-align: center; padding: 2rem 0 1rem;">
-        <h1 style="font-size: 2.2rem; font-weight: 600;">E_LENS</h1>
-        <p style="color: #666; font-size: 1rem;">Ecommerce Analytics Agent</p>
-    </div>
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@700&family=Noto+Sans+KR:wght@400;500&display=swap');
+    .login-title {
+        font-family: 'Sora', sans-serif;
+        font-size: 2.4rem; font-weight: 700;
+        background: linear-gradient(135deg, #06b6d4, #818cf8);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        text-align: center; margin-bottom: 4px;
+    }
+    .login-sub {
+        text-align: center; color: #64748b;
+        font-size: 0.88rem; margin-bottom: 2rem;
+        font-family: 'Noto Sans KR', sans-serif;
+    }
+    </style>
     """, unsafe_allow_html=True)
+
+    st.markdown('<div class="login-title">E_LENS</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-sub">이커머스 데이터분석 자동화의 모든 것</div>',
+                unsafe_allow_html=True)
 
     col = st.columns([1, 2, 1])[1]
     with col:
-        with st.form("login_form"):
-            st.markdown("#### 로그인")
-            email    = st.text_input("이메일", placeholder="admin@elens.com")
-            password = st.text_input("비밀번호", type="password")
-            submit   = st.form_submit_button("로그인", use_container_width=True)
+        # 탭 — 로그인 / 가입 요청
+        tab_login, tab_signup = st.tabs(["🔑  로그인", "✍️  가입 요청"])
 
-        if submit:
-            if not email or not password:
-                st.error("이메일과 비밀번호를 입력해주세요.")
-            else:
-                ok, msg = login(email, password)
-                if ok:
-                    st.success("로그인 성공!")
-                    st.rerun()
+        # ── 로그인 탭 ──────────────────────────────────────────────
+        with tab_login:
+            with st.form("login_form"):
+                email    = st.text_input("이메일", placeholder="your@email.com")
+                password = st.text_input("비밀번호", type="password")
+                submit   = st.form_submit_button("로그인", use_container_width=True)
+
+            if submit:
+                if not email or not password:
+                    st.error("이메일과 비밀번호를 입력해주세요.")
                 else:
-                    st.error(msg)
+                    ok, msg = login(email, password)
+                    if ok:
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        # ── 가입 요청 탭 ────────────────────────────────────────────
+        with tab_signup:
+            st.caption("관리자 승인 후 계정이 생성됩니다.")
+            with st.form("signup_form"):
+                req_name    = st.text_input("이름")
+                req_email   = st.text_input("이메일")
+                req_message = st.text_area("요청 메시지 (선택)", height=80,
+                                           placeholder="소속, 사용 목적 등을 간단히 적어주세요.")
+                req_submit  = st.form_submit_button("가입 요청", use_container_width=True)
+
+            if req_submit:
+                if not req_name or not req_email:
+                    st.error("이름과 이메일을 입력해주세요.")
+                elif "@" not in req_email:
+                    st.error("올바른 이메일 형식을 입력해주세요.")
+                else:
+                    ok = create_signup_request(
+                        name=req_name.strip(),
+                        email=req_email.strip(),
+                        message=req_message.strip(),
+                    )
+                    if ok:
+                        st.success(
+                            "가입 요청이 접수됐어요. "
+                            "관리자 승인 후 이메일로 안내드릴게요."
+                        )
+                    else:
+                        st.warning("이미 요청된 이메일입니다.")

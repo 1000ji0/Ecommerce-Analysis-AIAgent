@@ -18,7 +18,8 @@ for p in (str(ROOT), str(SRC)):
 from auth.auth import ensure_db, is_logged_in, is_admin, get_current_user, logout
 from auth.auth_db import (
     get_all_users, create_user, update_user, delete_user,
-    get_all_sessions,
+    get_all_sessions, get_all_signup_requests,
+    approve_signup_request, reject_signup_request,
 )
 
 
@@ -48,7 +49,7 @@ def main() -> None:
 
     st.divider()
 
-    tab1, tab2 = st.tabs(["👥 사용자 관리", "📋 세션 현황"])
+    tab1, tab2, tab3 = st.tabs(["👥 사용자 관리", "📋 세션 현황", "📬 가입 요청"])
 
     # ── 탭 1: 사용자 관리 ─────────────────────────────────────────────
     with tab1:
@@ -165,6 +166,51 @@ def main() -> None:
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.info("세션 기록 없음")
+
+    # ── 탭 3: 가입 요청 ───────────────────────────────────────────────
+    with tab3:
+        requests = get_all_signup_requests()
+        pending  = [r for r in requests if r["status"] == "pending"]
+
+        if pending:
+            st.info(f"대기 중인 가입 요청 {len(pending)}건")
+        else:
+            st.success("대기 중인 요청 없음")
+
+        for req in requests:
+            status_icon = {"pending": "⏳", "approved": "✅", "rejected": "❌"}.get(
+                req["status"], "❓"
+            )
+            with st.expander(
+                f"{status_icon}  {req['name']}  ({req['email']})  —  {req['created_at'][:16]}",
+                expanded=(req["status"] == "pending"),
+            ):
+                if req.get("message"):
+                    st.markdown(f"**요청 메시지:** {req['message']}")
+                st.caption(f"상태: {req['status']}")
+
+                if req["status"] == "pending":
+                    col_a, col_b = st.columns(2)
+                    temp_pw = col_a.text_input(
+                        "임시 비밀번호",
+                        value="E_LENS!2024",
+                        key=f"pw_{req['id']}",
+                    )
+                    if col_a.button("✅ 승인", key=f"approve_{req['id']}",
+                                    use_container_width=True):
+                        if not temp_pw.strip():
+                            st.error("임시 비밀번호를 입력해주세요.")
+                        else:
+                            approve_signup_request(req["id"], temp_pw.strip())
+                            name = req['name']
+                            st.success(f"{name} 계정 승인 완료. 임시 비밀번호: {temp_pw}")
+                            st.rerun()
+
+                    if col_b.button("❌ 거절", key=f"reject_{req['id']}",
+                                    use_container_width=True):
+                        reject_signup_request(req["id"])
+                        st.warning(f"{req['name']} 요청 거절됨")
+                        st.rerun()
 
 
 main()
