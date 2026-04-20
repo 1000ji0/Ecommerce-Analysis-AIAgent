@@ -9,11 +9,17 @@ from pathlib import Path
 import streamlit as st
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[3]
-SRC  = ROOT / "src"
-for p in (str(ROOT), str(SRC)):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+# Streamlit Cloud / 로컬 모두 대응
+_HERE = Path(__file__).resolve()
+for _candidate in [
+    _HERE.parents[3],           # root
+    _HERE.parents[3] / "src",   # src
+    _HERE.parents[2],           # src (로컬)
+    _HERE.parents[1],           # streamlit
+]:
+    _p = str(_candidate)
+    if _candidate.exists() and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from auth.auth import ensure_db, is_logged_in, is_admin, get_current_user, logout
 from auth.auth_db import (

@@ -10,11 +10,17 @@ from pathlib import Path
 import streamlit as st
 from langgraph.types import Command
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC  = ROOT / "src"
-for p in (str(ROOT), str(SRC)):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+# Streamlit Cloud / 로컬 모두 대응
+_HERE = Path(__file__).resolve()
+for _candidate in [
+    _HERE.parents[2],           # root
+    _HERE.parents[2] / "src",   # src
+    _HERE.parents[1],           # src (로컬)
+    _HERE.parent,               # streamlit
+]:
+    _p = str(_candidate)
+    if _candidate.exists() and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from config import GOOGLE_API_KEY, SAMPLE_DATA_DIR
 from auth.auth import ensure_db, is_logged_in, get_current_user, logout, render_login_page
@@ -71,41 +77,87 @@ def _inject_css() -> None:
         color: var(--text) !important;
         font-family: 'Noto Sans KR', sans-serif !important;
     }
+
+    /* 사이드바 — 다크 유지 */
     [data-testid="stSidebar"] {
         background: var(--surface) !important;
         border-right: 1px solid var(--border) !important;
     }
     [data-testid="stSidebar"] * { color: var(--text) !important; }
 
-    /* 채팅 입력 */
-    [data-testid="stChatInput"] textarea {
-        background: var(--surface2) !important;
-        border: 1px solid var(--border) !important;
-        color: var(--text) !important;
-        border-radius: 12px !important;
+    /* 메인 영역 — 밝고 깨끗하게 */
+    [data-testid="stMain"] {
+        background: #f8fafc !important;
     }
-    [data-testid="stChatInput"] textarea:focus {
-        border-color: var(--cyan) !important;
-        box-shadow: 0 0 0 2px var(--cyan-dim) !important;
+    .main .block-container {
+        background: #f8fafc !important;
+        max-width: 800px !important;
+        padding: 2rem 2rem !important;
     }
 
-    /* 버튼 */
-    .stButton > button {
+    /* 채팅 입력 */
+    [data-testid="stChatInput"] {
+        background: #ffffff !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 16px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06) !important;
+    }
+    [data-testid="stChatInput"] textarea {
+        background: transparent !important;
+        border: none !important;
+        color: #1e293b !important;
+        font-size: 0.95rem !important;
+    }
+    [data-testid="stChatInput"]:focus-within {
+        border-color: #06b6d4 !important;
+        box-shadow: 0 2px 12px rgba(6,182,212,0.15) !important;
+    }
+
+    /* 사이드바 버튼 */
+    [data-testid="stSidebar"] .stButton > button {
         background: var(--surface2) !important;
         border: 1px solid var(--border) !important;
         color: var(--text) !important;
         border-radius: 8px !important;
         transition: all 0.2s !important;
     }
-    .stButton > button:hover {
+    [data-testid="stSidebar"] .stButton > button:hover {
         border-color: var(--cyan) !important;
         background: var(--cyan-dim) !important;
     }
-    .stButton > button[kind="primary"] {
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
         background: var(--cyan) !important;
         border-color: var(--cyan) !important;
         color: #0a0f1e !important;
         font-weight: 600 !important;
+    }
+
+    /* 메인 버튼 — 밝은 스타일 */
+    [data-testid="stMain"] .stButton > button {
+        background: #ffffff !important;
+        border: 1.5px solid #e2e8f0 !important;
+        color: #1e293b !important;
+        border-radius: 10px !important;
+        padding: 0.5rem 1rem !important;
+        font-weight: 500 !important;
+        transition: all 0.15s !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+    }
+    [data-testid="stMain"] .stButton > button:hover {
+        border-color: #06b6d4 !important;
+        box-shadow: 0 2px 8px rgba(6,182,212,0.15) !important;
+        transform: translateY(-1px) !important;
+    }
+    [data-testid="stMain"] .stButton > button[kind="primary"] {
+        background: #06b6d4 !important;
+        border-color: #06b6d4 !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        box-shadow: 0 4px 12px rgba(6,182,212,0.3) !important;
+    }
+    [data-testid="stMain"] .stButton > button[kind="primary"]:hover {
+        background: #0891b2 !important;
+        transform: translateY(-1px) !important;
     }
 
     /* 카드 선택 버튼 */
@@ -203,9 +255,45 @@ def _inject_css() -> None:
     /* divider */
     hr { border-color: var(--border) !important; }
 
-    /* selectbox / slider */
+    /* 슬라이더 — 흰색 바, 하늘색 커서 */
     [data-testid="stSelectSlider"] { color: var(--text) !important; }
-    .stSlider [data-baseweb="slider"] div { background: var(--cyan) !important; }
+    [data-testid="stSlider"] [role="slider"] {
+        background: #06b6d4 !important;
+        border-color: #06b6d4 !important;
+        box-shadow: 0 0 0 4px rgba(6,182,212,0.2) !important;
+    }
+    [data-testid="stSlider"] [data-baseweb="slider"] > div:first-child {
+        background: rgba(255,255,255,0.15) !important;
+    }
+    [data-testid="stSlider"] [data-baseweb="slider"] > div:nth-child(2) {
+        background: #06b6d4 !important;
+    }
+
+    /* 채팅 메시지 영역 — 흰색 배경 */
+    [data-testid="stChatMessage"] {
+        background: #ffffff !important;
+        border-radius: 12px !important;
+        border: 1px solid #e2e8f0 !important;
+        color: #1e293b !important;
+        margin-bottom: 8px !important;
+    }
+    [data-testid="stChatMessage"] p,
+    [data-testid="stChatMessage"] span,
+    [data-testid="stChatMessage"] div {
+        color: #1e293b !important;
+    }
+    [data-testid="stChatMessage"][data-testid*="user"] {
+        background: #f0f9ff !important;
+        border-color: #bae6fd !important;
+    }
+    /* 메인 채팅 배경을 밝게 */
+    [data-testid="stMain"] > div {
+        background: #f8fafc !important;
+    }
+    .main .block-container {
+        background: #f8fafc !important;
+        padding: 2rem 3rem !important;
+    }
 
     /* expander */
     [data-testid="stExpander"] {
