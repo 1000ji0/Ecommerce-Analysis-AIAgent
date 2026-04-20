@@ -47,7 +47,7 @@ def main() -> None:
     col1, col2 = st.columns([6, 1])
     with col1:
         st.title("E_LENS 관리자")
-        st.caption(f"로그인: {user['name']} ({user['email']})")
+        st.caption(f"로그인: {user['name']} ({user.get('login_id', '-')})")
     with col2:
         if st.button("로그아웃"):
             logout()
@@ -66,9 +66,9 @@ def main() -> None:
             users = get_all_users()
             if users:
                 df = pd.DataFrame(users)[
-                    ["id", "name", "email", "role", "is_active", "created_at", "last_login"]
+                    ["id", "login_id", "name", "role", "is_active", "created_at", "last_login"]
                 ]
-                df.columns = ["ID", "이름", "이메일", "권한", "활성", "가입일", "최근 로그인"]
+                df.columns = ["ID", "아이디", "이름", "권한", "활성", "가입일", "최근 로그인"]
                 df["활성"] = df["활성"].map({1: "✅", 0: "❌"})
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
@@ -79,16 +79,16 @@ def main() -> None:
             st.subheader("사용자 추가")
             with st.form("add_user_form"):
                 new_name  = st.text_input("이름")
-                new_email = st.text_input("이메일")
-                new_pw    = st.text_input("임시 비밀번호", type="password")
+                new_login_id = st.text_input("아이디")
+                new_pw    = st.text_input("비밀번호", type="password")
                 new_role  = st.selectbox("권한", ["user", "admin"])
                 if st.form_submit_button("추가", use_container_width=True):
-                    if not all([new_name, new_email, new_pw]):
+                    if not all([new_name, new_login_id, new_pw]):
                         st.error("모든 항목을 입력해주세요.")
                     else:
                         try:
                             create_user(
-                                email=new_email.strip().lower(),
+                                login_id=new_login_id.strip().lower(),
                                 password=new_pw,
                                 name=new_name.strip(),
                                 role=new_role,
@@ -102,12 +102,12 @@ def main() -> None:
 
             # 사용자 수정
             st.subheader("사용자 수정")
-            users_for_edit = [u for u in users if u["email"] != user["email"]]
+            users_for_edit = [u for u in users if u.get("id") != user.get("id")]
             if users_for_edit:
                 target = st.selectbox(
                     "대상",
                     users_for_edit,
-                    format_func=lambda u: f"{u['name']} ({u['email']})",
+                    format_func=lambda u: f"{u['name']} ({u.get('login_id', '-')})",
                     key="edit_target",
                 )
                 with st.form("edit_user_form"):
@@ -152,13 +152,13 @@ def main() -> None:
             st.divider()
 
             df = pd.DataFrame(sessions)
-            display_cols = ["session_id", "user_name", "user_email",
+            display_cols = ["session_id", "user_name", "user_login_id",
                             "role", "purpose", "hitl_level",
                             "status", "created_at", "summary"]
             available = [c for c in display_cols if c in df.columns]
             df = df[available].copy()
             df.columns = [
-                "세션 ID", "사용자", "이메일",
+                "세션 ID", "사용자", "아이디",
                 "직군", "목적", "HITL 레벨",
                 "상태", "생성일", "요약"
             ][:len(available)]
@@ -188,7 +188,7 @@ def main() -> None:
                 req["status"], "❓"
             )
             with st.expander(
-                f"{status_icon}  {req['name']}  ({req['email']})  —  {req['created_at'][:16]}",
+                f"{status_icon}  {req['name']}  ({req.get('login_id', '-')})  —  {req['created_at'][:16]}",
                 expanded=(req["status"] == "pending"),
             ):
                 if req.get("message"):
@@ -197,20 +197,15 @@ def main() -> None:
 
                 if req["status"] == "pending":
                     col_a, col_b = st.columns(2)
-                    temp_pw = col_a.text_input(
-                        "임시 비밀번호",
-                        value="E_LENS!2024",
-                        key=f"pw_{req['id']}",
-                    )
                     if col_a.button("✅ 승인", key=f"approve_{req['id']}",
                                     use_container_width=True):
-                        if not temp_pw.strip():
-                            st.error("임시 비밀번호를 입력해주세요.")
-                        else:
-                            approve_signup_request(req["id"], temp_pw.strip())
+                        created = approve_signup_request(req["id"])
+                        if created:
                             name = req['name']
-                            st.success(f"{name} 계정 승인 완료. 임시 비밀번호: {temp_pw}")
+                            st.success(f"{name} 계정 승인 완료")
                             st.rerun()
+                        else:
+                            st.error("승인 실패: 요청 정보(아이디/비밀번호)를 확인해주세요.")
 
                     if col_b.button("❌ 거절", key=f"reject_{req['id']}",
                                     use_container_width=True):

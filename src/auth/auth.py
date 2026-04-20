@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from auth.auth_db import (
     init_db,
-    get_user_by_email,
+    get_user_by_login_id,
     verify_password,
     update_last_login,
     create_signup_request,
@@ -37,29 +37,30 @@ def is_admin() -> bool:
     return bool(user and user.get("role") == "admin")
 
 
-def login(email: str, password: str) -> tuple[bool, str]:
+def login(login_id: str, password: str) -> tuple[bool, str]:
     """
     로그인 처리
     Returns: (성공 여부, 에러 메시지)
     """
-    user = get_user_by_email(email.strip().lower())
+    user = get_user_by_login_id(login_id)
 
     if not user:
-        return False, "이메일 또는 비밀번호가 올바르지 않습니다."
+        return False, "아이디 또는 비밀번호가 올바르지 않습니다."
 
     if not user.get("is_active"):
         return False, "비활성화된 계정입니다. 관리자에게 문의하세요."
 
     if not verify_password(password, user["password"]):
-        return False, "이메일 또는 비밀번호가 올바르지 않습니다."
+        return False, "아이디 또는 비밀번호가 올바르지 않습니다."
 
     # 로그인 성공
     update_last_login(user["id"])
     st.session_state.auth_user = {
-        "id":    user["id"],
-        "email": user["email"],
-        "name":  user["name"],
-        "role":  user["role"],
+        "id":       user["id"],
+        "login_id": user.get("login_id", ""),
+        "email":    user.get("email", ""),
+        "name":     user["name"],
+        "role":     user["role"],
     }
     return True, ""
 
@@ -107,15 +108,15 @@ def render_login_page() -> None:
         # ── 로그인 탭 ──────────────────────────────────────────────
         with tab_login:
             with st.form("login_form"):
-                email    = st.text_input("이메일", placeholder="your@email.com")
+                login_id = st.text_input("아이디", placeholder="your_id")
                 password = st.text_input("비밀번호", type="password")
                 submit   = st.form_submit_button("로그인", use_container_width=True)
 
             if submit:
-                if not email or not password:
-                    st.error("이메일과 비밀번호를 입력해주세요.")
+                if not login_id or not password:
+                    st.error("아이디와 비밀번호를 입력해주세요.")
                 else:
-                    ok, msg = login(email, password)
+                    ok, msg = login(login_id.strip().lower(), password)
                     if ok:
                         st.rerun()
                     else:
@@ -123,29 +124,34 @@ def render_login_page() -> None:
 
         # ── 가입 요청 탭 ────────────────────────────────────────────
         with tab_signup:
-            st.caption("관리자 승인 후 계정이 생성됩니다.")
+            st.caption("가입 요청 시 입력한 비밀번호로 관리자 승인 후 계정이 생성됩니다.")
             with st.form("signup_form"):
                 req_name    = st.text_input("이름")
-                req_email   = st.text_input("이메일")
+                req_login_id = st.text_input("아이디")
+                req_pw      = st.text_input("비밀번호", type="password")
+                req_pw2     = st.text_input("비밀번호 확인", type="password")
                 req_message = st.text_area("요청 메시지 (선택)", height=80,
                                            placeholder="소속, 사용 목적 등을 간단히 적어주세요.")
                 req_submit  = st.form_submit_button("가입 요청", use_container_width=True)
 
             if req_submit:
-                if not req_name or not req_email:
-                    st.error("이름과 이메일을 입력해주세요.")
-                elif "@" not in req_email:
-                    st.error("올바른 이메일 형식을 입력해주세요.")
+                if not req_name or not req_login_id or not req_pw:
+                    st.error("이름, 아이디, 비밀번호를 입력해주세요.")
+                elif len(req_login_id.strip()) < 3:
+                    st.error("아이디는 3자 이상으로 입력해주세요.")
+                elif req_pw != req_pw2:
+                    st.error("비밀번호 확인이 일치하지 않습니다.")
                 else:
                     ok = create_signup_request(
                         name=req_name.strip(),
-                        email=req_email.strip(),
+                        login_id=req_login_id.strip().lower(),
+                        password=req_pw,
                         message=req_message.strip(),
                     )
                     if ok:
                         st.success(
                             "가입 요청이 접수됐어요. "
-                            "관리자 승인 후 이메일로 안내드릴게요."
+                            "관리자 승인 후 같은 아이디/비밀번호로 로그인해주세요."
                         )
                     else:
-                        st.warning("이미 요청된 이메일입니다.")
+                        st.warning("이미 사용 중이거나 요청된 아이디입니다.")

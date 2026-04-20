@@ -330,15 +330,20 @@ def _inject_css() -> None:
         background: var(--card) !important;
         border-radius: 14px !important;
         border: 1px solid var(--card-bd) !important;
-        color: var(--ink) !important;
+        color: #0f172a !important;
         margin-bottom: 10px !important;
         box-shadow: 0 10px 22px rgba(4,10,22,0.32) !important;
     }
     [data-testid="stChatMessage"] p,
     [data-testid="stChatMessage"] span,
     [data-testid="stChatMessage"] div {
-        color: var(--ink) !important;
+        color: #0f172a !important;
         line-height: 1.5 !important;
+    }
+    [data-testid="stChatMessage"] *,
+    [data-testid="stChatMessageContent"] *,
+    [data-testid="stChatMessage"] a {
+        color: #0f172a !important;
     }
     [data-testid="stChatMessage"][data-testid*="user"] {
         background: var(--card-soft) !important;
@@ -399,6 +404,50 @@ def _inject_css() -> None:
     [data-testid="stMain"] div {
         color: var(--ink) !important;
     }
+
+    .chat-top-wrap {
+        margin-bottom: 0.9rem;
+    }
+    .chat-top {
+        border: 1px solid var(--card-bd);
+        background: linear-gradient(160deg, rgba(18, 29, 51, 0.96), rgba(12, 21, 39, 0.92));
+        border-radius: 16px;
+        padding: 1rem 1.05rem 0.95rem;
+        box-shadow: 0 10px 24px rgba(4, 10, 22, 0.26);
+    }
+    .chat-top-title {
+        font-family: 'Sora', sans-serif;
+        font-size: 1.02rem;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+        color: #e7eef8;
+        margin-bottom: 0.18rem;
+    }
+    .chat-top-sub {
+        font-size: 0.84rem;
+        color: #9fb3ca;
+        margin-bottom: 0.65rem;
+    }
+    .chat-top-chips {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+    .chat-top-chip {
+        font-size: 0.74rem;
+        color: #bee7ff;
+        background: rgba(6,182,212,0.12);
+        border: 1px solid rgba(6,182,212,0.34);
+        border-radius: 999px;
+        padding: 0.18rem 0.56rem;
+        font-weight: 600;
+    }
+    .starter-label {
+        margin-top: 0.55rem;
+        margin-bottom: 0.35rem;
+        color: #9fb3ca;
+        font-size: 0.8rem;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -430,6 +479,57 @@ def _collect_chart_paths() -> list[str]:
     ag04 = st.session_state.agent_results.get("AG-04", {})
     return [str(Path(p).resolve()) for p in (ag04.get("image_paths") or [])
             if Path(str(p)).is_file()]
+
+
+def _render_chat_top_header() -> None:
+    profile = st.session_state.get("user_profile") or {}
+    role = profile.get("role") or "분석 준비"
+    purpose = profile.get("purpose") or "데이터 연결 후 맞춤 분석 시작"
+
+    st.markdown(
+        f"""
+        <div class="chat-top-wrap">
+          <div class="chat-top">
+            <div class="chat-top-title">무엇을 도와드릴까요?</div>
+            <div class="chat-top-sub">현재 모드: <b>{role}</b> · {purpose}</div>
+            <div class="chat-top-chips">
+              <span class="chat-top-chip">대화형 분석</span>
+              <span class="chat-top-chip">자동 차트 생성</span>
+              <span class="chat-top-chip">인사이트 요약</span>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_starter_prompts() -> None:
+    if not _session_ready() or st.session_state.pending_hitl:
+        return
+
+    has_user_message = any(m.get("role") == "user" for m in st.session_state.messages)
+    if has_user_message:
+        return
+
+    st.markdown('<div class="starter-label">빠른 시작</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+
+    starters = [
+        ("📈 성과 요약", "업로드된 데이터 기준 핵심 성과 지표를 5줄로 요약해줘"),
+        ("🔎 EDA 시작", "데이터 품질 점검과 EDA를 먼저 진행해줘"),
+        ("🧠 인사이트", "매출에 영향을 주는 핵심 요인과 액션 아이템을 알려줘"),
+    ]
+
+    if c1.button(starters[0][0], key="starter_1", use_container_width=True):
+        _run_prompt(starters[0][1])
+        st.rerun()
+    if c2.button(starters[1][0], key="starter_2", use_container_width=True):
+        _run_prompt(starters[1][1])
+        st.rerun()
+    if c3.button(starters[2][0], key="starter_3", use_container_width=True):
+        _run_prompt(starters[2][1])
+        st.rerun()
 
 
 def _append_assistant(text: str) -> None:
@@ -694,7 +794,7 @@ def _render_sidebar() -> None:
         st.markdown(f"""
         <div class="sidebar-account">
             <div class="name">{user['name']}</div>
-            <div class="email">{user['email']}</div>
+            <div class="email">@{user.get('login_id', user.get('email', ''))}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -768,6 +868,8 @@ def main() -> None:
         return
 
     _render_sidebar()
+    _render_chat_top_header()
+    _render_starter_prompts()
 
     # 채팅 기록 렌더링
     for m in st.session_state.messages:
