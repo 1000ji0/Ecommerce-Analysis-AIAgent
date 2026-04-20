@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from auth.auth_db import (
     init_db,
     get_user_by_login_id,
+    get_user_by_email,
     verify_password,
     update_last_login,
     create_signup_request,
@@ -29,7 +30,18 @@ def is_logged_in() -> bool:
 
 
 def get_current_user() -> dict | None:
-    return st.session_state.get("auth_user")
+    user = st.session_state.get("auth_user")
+    if not user:
+        return None
+
+    login_id = (user.get("login_id") or "").strip().lower()
+    if not login_id:
+        email = (user.get("email") or "").strip().lower()
+        login_id = email.split("@")[0] if "@" in email else "user"
+        user["login_id"] = login_id
+        st.session_state.auth_user = user
+
+    return user
 
 
 def is_admin() -> bool:
@@ -42,7 +54,10 @@ def login(login_id: str, password: str) -> tuple[bool, str]:
     로그인 처리
     Returns: (성공 여부, 에러 메시지)
     """
-    user = get_user_by_login_id(login_id)
+    normalized = login_id.strip().lower()
+    user = get_user_by_login_id(normalized)
+    if not user and "@" in normalized:
+        user = get_user_by_email(normalized)
 
     if not user:
         return False, "아이디 또는 비밀번호가 올바르지 않습니다."
@@ -58,7 +73,6 @@ def login(login_id: str, password: str) -> tuple[bool, str]:
     st.session_state.auth_user = {
         "id":       user["id"],
         "login_id": user.get("login_id", ""),
-        "email":    user.get("email", ""),
         "name":     user["name"],
         "role":     user["role"],
     }

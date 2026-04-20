@@ -794,7 +794,7 @@ def _render_sidebar() -> None:
         st.markdown(f"""
         <div class="sidebar-account">
             <div class="name">{user['name']}</div>
-            <div class="email">@{user.get('login_id', user.get('email', ''))}</div>
+            <div class="email">@{user.get('login_id', '')}</div>
         </div>
         """, unsafe_allow_html=True)
 
