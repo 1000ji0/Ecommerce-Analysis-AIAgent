@@ -82,7 +82,7 @@ def render_login_page() -> None:
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@700&family=Noto+Sans+KR:wght@400;500&display=swap');
     .login-title {
         font-family: 'Sora', sans-serif;
-        font-size: 2.4rem; font-weight: 700;
+        font-size: 3.1rem; font-weight: 700;
         background: linear-gradient(135deg, #06b6d4, #818cf8);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         text-align: center; margin-bottom: 4px;

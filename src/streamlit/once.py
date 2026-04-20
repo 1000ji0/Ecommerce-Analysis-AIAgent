@@ -62,14 +62,20 @@ def _inject_css() -> None:
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 
     :root {
-        --bg:       #0a0f1e;
-        --surface:  #111827;
-        --surface2: #1a2233;
-        --border:   #1e2d45;
+        --bg:       #070d19;
+        --surface:  #0d1526;
+        --surface2: #111c31;
+        --border:   #243554;
         --cyan:     #06b6d4;
         --cyan-dim: rgba(6,182,212,0.12);
-        --text:     #e2e8f0;
-        --muted:    #64748b;
+        --text:     #dbe7f5;
+        --muted:    #8ea3bb;
+        --main-bg:  radial-gradient(1200px 600px at 70% -5%, #14213d 0%, #0a1324 45%, #070d19 100%);
+        --card:     #111b30;
+        --card-soft:#132540;
+        --card-bd:  #2b3f61;
+        --ink:      #e7eef8;
+        --ink-sub:  #a5b8cc;
     }
 
     html, body, [data-testid="stAppViewContainer"] {
@@ -80,45 +86,50 @@ def _inject_css() -> None:
 
     /* 사이드바 — 다크 유지 */
     [data-testid="stSidebar"] {
-        background: var(--surface) !important;
+        background: linear-gradient(180deg, #0d1526 0%, #0a1323 100%) !important;
         border-right: 1px solid var(--border) !important;
+        box-shadow: 12px 0 34px rgba(4, 10, 22, 0.32) !important;
     }
     [data-testid="stSidebar"] * { color: var(--text) !important; }
 
     /* 메인 영역 — 밝고 깨끗하게 */
     [data-testid="stMain"] {
-        background: #f8fafc !important;
+        background: var(--main-bg) !important;
     }
     .main .block-container {
-        background: #f8fafc !important;
-        max-width: 800px !important;
-        padding: 2rem 2rem !important;
+        background: transparent !important;
+        max-width: 900px !important;
+        padding: 2.25rem 2.5rem !important;
     }
 
     /* 채팅 입력 */
     [data-testid="stChatInput"] {
-        background: #ffffff !important;
-        border: 1.5px solid #e2e8f0 !important;
-        border-radius: 16px !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.06) !important;
+        background: var(--card) !important;
+        border: 1.5px solid var(--card-bd) !important;
+        border-radius: 14px !important;
+        box-shadow: 0 8px 24px rgba(4,10,22,0.36) !important;
     }
     [data-testid="stChatInput"] textarea {
         background: transparent !important;
         border: none !important;
-        color: #1e293b !important;
+        color: var(--ink) !important;
         font-size: 0.95rem !important;
+        line-height: 1.45 !important;
+    }
+    [data-testid="stChatInput"] textarea::placeholder {
+        color: #8ea3bb !important;
     }
     [data-testid="stChatInput"]:focus-within {
         border-color: #06b6d4 !important;
-        box-shadow: 0 2px 12px rgba(6,182,212,0.15) !important;
+        box-shadow: 0 0 0 1px rgba(6,182,212,0.35), 0 12px 28px rgba(6,182,212,0.2) !important;
     }
 
     /* 사이드바 버튼 */
     [data-testid="stSidebar"] .stButton > button {
-        background: var(--surface2) !important;
+        background: rgba(255,255,255,0.02) !important;
         border: 1px solid var(--border) !important;
         color: var(--text) !important;
-        border-radius: 8px !important;
+        border-radius: 10px !important;
         transition: all 0.2s !important;
     }
     [data-testid="stSidebar"] .stButton > button:hover {
@@ -134,29 +145,29 @@ def _inject_css() -> None:
 
     /* 메인 버튼 — 밝은 스타일 */
     [data-testid="stMain"] .stButton > button {
-        background: #ffffff !important;
-        border: 1.5px solid #e2e8f0 !important;
-        color: #1e293b !important;
-        border-radius: 10px !important;
+        background: var(--card) !important;
+        border: 1.5px solid var(--card-bd) !important;
+        color: var(--ink) !important;
+        border-radius: 12px !important;
         padding: 0.5rem 1rem !important;
-        font-weight: 500 !important;
-        transition: all 0.15s !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+        font-weight: 600 !important;
+        transition: all 0.18s ease !important;
+        box-shadow: 0 6px 18px rgba(4,10,22,0.28) !important;
     }
     [data-testid="stMain"] .stButton > button:hover {
         border-color: #06b6d4 !important;
-        box-shadow: 0 2px 8px rgba(6,182,212,0.15) !important;
+        box-shadow: 0 6px 18px rgba(6,182,212,0.15) !important;
         transform: translateY(-1px) !important;
     }
     [data-testid="stMain"] .stButton > button[kind="primary"] {
-        background: #06b6d4 !important;
-        border-color: #06b6d4 !important;
-        color: #ffffff !important;
+        background: linear-gradient(135deg, #06b6d4, #3b82f6) !important;
+        border-color: #0ea5c4 !important;
+        color: #f8fbff !important;
         font-weight: 600 !important;
-        box-shadow: 0 4px 12px rgba(6,182,212,0.3) !important;
+        box-shadow: 0 10px 24px rgba(14,165,233,0.35) !important;
     }
     [data-testid="stMain"] .stButton > button[kind="primary"]:hover {
-        background: #0891b2 !important;
+        background: linear-gradient(135deg, #0891b2, #2563eb) !important;
         transform: translateY(-1px) !important;
     }
 
@@ -184,19 +195,64 @@ def _inject_css() -> None:
     /* 타이틀 */
     .elens-title {
         font-family: 'Sora', sans-serif !important;
-        font-size: 2.6rem !important;
+        font-size: 3.25rem !important;
         font-weight: 700 !important;
         background: linear-gradient(135deg, #06b6d4, #818cf8);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        letter-spacing: -0.5px;
+        letter-spacing: -0.7px;
         margin: 0 !important;
+        line-height: 1.05 !important;
     }
     .elens-sub {
-        color: var(--muted) !important;
-        font-size: 0.9rem !important;
-        margin-top: 4px !important;
+        color: #a9bdd3 !important;
+        font-size: 1.08rem !important;
+        margin-top: 10px !important;
         letter-spacing: 0.3px;
+        font-weight: 500 !important;
+    }
+
+    .hero-wrap {
+        text-align: center;
+        padding: 2.8rem 1rem 2.2rem;
+    }
+    .hero-card {
+        max-width: 720px;
+        margin: 0 auto;
+        background: linear-gradient(170deg, rgba(17,27,48,0.96), rgba(13,21,38,0.92));
+        border: 1px solid #2e466c;
+        border-radius: 18px;
+        padding: 1.7rem 1.8rem 1.5rem;
+        box-shadow: 0 20px 46px rgba(4,10,22,0.45);
+        backdrop-filter: blur(5px);
+    }
+    .hero-kicker {
+        display: inline-block;
+        padding: 0.3rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(6,182,212,0.14);
+        color: #8ee9ff;
+        border: 1px solid rgba(6,182,212,0.35);
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        margin-bottom: 0.7rem;
+    }
+    .hero-points {
+        margin-top: 1rem;
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+    }
+    .hero-chip {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #bdd8f5;
+        background: #14233d;
+        border: 1px solid #36517a;
+        border-radius: 999px;
+        padding: 0.3rem 0.62rem;
     }
 
     /* 온보딩 스텝 */
@@ -214,7 +270,7 @@ def _inject_css() -> None:
         margin-right: 8px;
     }
     .step-title {
-        font-size: 1rem;
+        font-size: 1.1rem;
         font-weight: 600;
         color: var(--text);
         display: flex;
@@ -224,8 +280,8 @@ def _inject_css() -> None:
 
     /* 업로드 존 */
     [data-testid="stFileUploader"] {
-        background: var(--surface2) !important;
-        border: 1.5px dashed var(--border) !important;
+        background: rgba(255,255,255,0.015) !important;
+        border: 1.5px dashed #3b557a !important;
         border-radius: 12px !important;
     }
     [data-testid="stFileUploader"]:hover {
@@ -271,35 +327,77 @@ def _inject_css() -> None:
 
     /* 채팅 메시지 영역 — 흰색 배경 */
     [data-testid="stChatMessage"] {
-        background: #ffffff !important;
-        border-radius: 12px !important;
-        border: 1px solid #e2e8f0 !important;
-        color: #1e293b !important;
-        margin-bottom: 8px !important;
+        background: var(--card) !important;
+        border-radius: 14px !important;
+        border: 1px solid var(--card-bd) !important;
+        color: var(--ink) !important;
+        margin-bottom: 10px !important;
+        box-shadow: 0 10px 22px rgba(4,10,22,0.32) !important;
     }
     [data-testid="stChatMessage"] p,
     [data-testid="stChatMessage"] span,
     [data-testid="stChatMessage"] div {
-        color: #1e293b !important;
+        color: var(--ink) !important;
+        line-height: 1.5 !important;
     }
     [data-testid="stChatMessage"][data-testid*="user"] {
-        background: #f0f9ff !important;
-        border-color: #bae6fd !important;
+        background: var(--card-soft) !important;
+        border-color: #386aa2 !important;
     }
     /* 메인 채팅 배경을 밝게 */
     [data-testid="stMain"] > div {
-        background: #f8fafc !important;
+        background: var(--main-bg) !important;
     }
     .main .block-container {
-        background: #f8fafc !important;
-        padding: 2rem 3rem !important;
+        background: transparent !important;
+        padding: 2.25rem 2.75rem !important;
     }
 
     /* expander */
     [data-testid="stExpander"] {
-        background: var(--surface2) !important;
+        background: #101a2f !important;
         border: 1px solid var(--border) !important;
         border-radius: 10px !important;
+    }
+
+    .sidebar-brand {
+        padding: 8px 0 16px;
+        font-family: 'Sora', sans-serif;
+        font-size: 1.4rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #06b6d4, #818cf8);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.2px;
+    }
+
+    .sidebar-account {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .sidebar-account .name {
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+    .sidebar-account .email {
+        color: var(--muted);
+        font-size: 0.78rem;
+        margin-top: 2px;
+    }
+
+    [data-testid="stCaptionContainer"] {
+        color: var(--ink-sub) !important;
+    }
+
+    [data-testid="stMain"] p,
+    [data-testid="stMain"] li,
+    [data-testid="stMain"] label,
+    [data-testid="stMain"] div {
+        color: var(--ink) !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -365,14 +463,23 @@ def _render_onboarding() -> None:
     # 웰컴 메시지
     if step == 0:
         st.markdown("""
-        <div style="text-align:center; padding: 3rem 1rem 2rem;">
-            <p class="elens-title">E_LENS</p>
-            <p class="elens-sub">이커머스 데이터분석 자동화의 모든 것</p>
+        <div class="hero-wrap">
+            <div class="hero-card">
+                <div class="hero-kicker">AI Commerce Intelligence</div>
+                <p class="elens-title">E_LENS</p>
+                <p class="elens-sub">이커머스 데이터 분석을 더 빠르고 선명하게 시작하세요</p>
+                <div class="hero-points">
+                    <span class="hero-chip">데이터 업로드 즉시 분석</span>
+                    <span class="hero-chip">직군별 맞춤 인사이트</span>
+                    <span class="hero-chip">대화형 리포트 생성</span>
+                </div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
         with st.chat_message("assistant", avatar="🔭"):
-            st.markdown("안녕하세요! **E_LENS**입니다. 분석할 데이터를 업로드해주세요.")
+            st.markdown("안녕하세요! **E_LENS**입니다.  \
+            준비된 CSV를 올리면 바로 분석을 시작할 수 있어요.")
 
         st.session_state.onboard_step = 1
         st.rerun()
@@ -532,10 +639,11 @@ def _render_hitl() -> None:
         return
 
     if input_type == "free_text":
-        if not free_text_answer.strip():
+        answer_text = str(free_text_answer or "")
+        if not answer_text.strip():
             st.warning("답변을 입력해주세요.")
             return
-        resume: dict = {"user_answer": free_text_answer.strip()}
+        resume: dict = {"user_answer": answer_text.strip()}
     else:
         resume = {"response": choice, "user_answer": "", "modified_input": {}}
         if choice == "수정" and modify.strip():
@@ -573,25 +681,20 @@ def _run_prompt(prompt: str) -> None:
 
 def _render_sidebar() -> None:
     user = get_current_user()
+    if not user:
+        return
 
     with st.sidebar:
         # 로고
         st.markdown("""
-        <div style="padding: 8px 0 16px;">
-            <span style="font-family:Sora,sans-serif; font-size:1.4rem;
-                         font-weight:700; background:linear-gradient(135deg,#06b6d4,#818cf8);
-                         -webkit-background-clip:text; -webkit-text-fill-color:transparent;">
-                E_LENS
-            </span>
-        </div>
+        <div class="sidebar-brand">E_LENS</div>
         """, unsafe_allow_html=True)
 
         # 계정 정보
         st.markdown(f"""
-        <div style="background:#1a2233; border:1px solid #1e2d45;
-                    border-radius:10px; padding:12px 14px; margin-bottom:12px;">
-            <div style="font-weight:600; font-size:0.95rem;">{user['name']}</div>
-            <div style="color:#64748b; font-size:0.78rem; margin-top:2px;">{user['email']}</div>
+        <div class="sidebar-account">
+            <div class="name">{user['name']}</div>
+            <div class="email">{user['email']}</div>
         </div>
         """, unsafe_allow_html=True)
 
