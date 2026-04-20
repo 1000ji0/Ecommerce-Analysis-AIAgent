@@ -87,7 +87,8 @@ def llm_feature_importance(
     ])
 
     import re
-    raw = re.sub(r"```(?:json)?|```", "", response.content.strip()).strip()
+    content_str = response.content if isinstance(response.content, str) else str(response.content)
+    raw = re.sub(r"```(?:json)?|```", "", content_str).strip()
     try:
         return json.loads(raw)
     except Exception:
@@ -139,7 +140,8 @@ def llm_eda_analysis(
     ])
 
     import re
-    raw = re.sub(r"```(?:json)?|```", "", response.content.strip()).strip()
+    content_str = response.content if isinstance(response.content, str) else str(response.content)
+    raw = re.sub(r"```(?:json)?|```", "", content_str).strip()
     try:
         return json.loads(raw)
     except Exception:
@@ -189,7 +191,8 @@ def llm_insight(
     ])
 
     import re
-    raw = re.sub(r"```(?:json)?|```", "", response.content.strip()).strip()
+    content_str = response.content if isinstance(response.content, str) else str(response.content)
+    raw = re.sub(r"```(?:json)?|```", "", content_str).strip()
     try:
         return json.loads(raw)
     except Exception:

@@ -44,7 +44,7 @@ def report_agent_node(state: GraphState) -> dict[str, Any]:
     agent_results = state.get("agent_results", {})
     ag05_params   = plan.get("params", {}).get("AG-05", {})
 
-    report_format = ag05_params.get("format", "pdf")
+    report_format = ag05_params.get("format", "docx")
 
     # ── 분석 결과 통합 ───────────────────────────────────────────────
     ag04_result = agent_results.get("AG-04", {})

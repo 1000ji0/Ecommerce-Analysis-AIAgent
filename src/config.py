@@ -54,6 +54,10 @@ def get_session_output_dir(session_id: str) -> Path:
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GEMINI_MODEL   = "gemini-2.5-flash"
 
+# AG-03 SQL 에이전트용 비즈니스 DB (오케스트레이터 플랜에 db_url이 없을 때 대체)
+# 예: sqlite:////absolute/path/to/app.db  또는 mysql+pymysql://user:pass@host/db
+AGENT_BUSINESS_DB_URL = os.getenv("AGENT_BUSINESS_DB_URL", "").strip()
+
 # ── MCP 서버 ─────────────────────────────────────────────────────────
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000/sse")
 

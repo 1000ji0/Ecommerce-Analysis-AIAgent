@@ -1,15 +1,9 @@
 """
 T-18 보고서 생성기
-분석 결과 전체를 PDF/CSV 보고서로 자동 생성
+분석 결과 전체를 Word(.docx) / CSV 보고서로 자동 생성
 
-라이브러리: weasyprint (HTML → PDF 변환)
-- 한국어 완벽 지원 (시스템 폰트 사용)
-- HTML/CSS 기반이라 레이아웃 자유도 높음
-- ReportLab 대비 폰트 설정 불필요
-
-weasyprint 시스템 의존성:
-  macOS:  brew install cairo pango
-  Ubuntu: apt-get install libcairo2 libpango-1.0-0 libpangocairo-1.0-0
+라이브러리: python-docx
+pyproject.toml 추가: "python-docx>=1.1.0"
 """
 import csv
 import traceback
@@ -20,35 +14,11 @@ from config import SESSION_DIR
 from tools.output.t20_trace_logger import log_tool_call
 
 
-###### main 함수: 보고서 생성 ######
 def generate_report(
     session_id: str,
     analysis_result: dict,
-    output_format: str = "pdf",
+    output_format: str = "docx",
 ) -> dict:
-    """
-    분석 결과를 보고서 파일로 생성
-
-    Args:
-        session_id:      세션 ID
-        analysis_result: {
-            "summary":         str,
-            "insights":        list[str],
-            "actions":         list[str],
-            "viz_suggestions": list[str],
-            "kpi_result":      dict,
-            "feature_ranking": dict,
-            "image_paths":     list[str],
-        }
-        output_format: "pdf" | "csv"
-
-    Returns:
-        {
-            "report_path": str,
-            "success":     bool,
-            "error":       str | None,
-        }
-    """
     report_dir = SESSION_DIR / session_id / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -57,13 +27,11 @@ def generate_report(
     report_path = report_dir / filename
 
     try:
-        if output_format == "pdf":
-            _build_pdf(report_path, analysis_result)
+        if output_format == "docx":
+            _build_docx(report_path, analysis_result)
         else:
             _build_csv(report_path, analysis_result)
-
         result = {"report_path": str(report_path), "success": True, "error": None}
-
     except Exception:
         result = {"report_path": "", "success": False, "error": traceback.format_exc()}
 
@@ -71,282 +39,195 @@ def generate_report(
     return result
 
 
-### 내부 함수: HTML 템플릿 생성 ###
-def _build_html(data: dict) -> str:
-    """
-    보고서 HTML 템플릿 생성
-    weasyprint가 이 HTML을 PDF로 변환
-    한국어: system-ui, Apple SD Gothic Neo, Malgun Gothic 등 시스템 폰트 사용
-    """
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    # ── 섹션별 HTML 조각 생성 ──────────────────────────────────────
-    summary_html        = _section_summary(data.get("summary", ""))
-    insights_html       = _section_list("핵심 인사이트", data.get("insights", []), "insight")
-    actions_html        = _section_list("액션 아이템",   data.get("actions",  []), "action")
-    viz_html            = _section_list("시각화 제안",   data.get("viz_suggestions", []), "viz")
-    kpi_html            = _section_kpi(data.get("kpi_result", {}))
-    feature_html        = _section_feature(data.get("feature_ranking", {}))
-    images_html         = _section_images(data.get("image_paths", []))
-
-    return f"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<style>
-  /* ── 기본 설정 ── */
-  body {{
-    font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Nanum Gothic",
-                 system-ui, sans-serif;
-    font-size: 11pt;
-    color: #1a1a1a;
-    margin: 0;
-    padding: 0;
-  }}
-
-  /* ── 페이지 설정 (weasyprint) ── */
-  @page {{
-    size: A4;
-    margin: 2cm 2cm 2.5cm 2cm;
-    @bottom-center {{
-      content: "DAISY 분석 보고서  |  " counter(page) " / " counter(pages);
-      font-size: 8pt;
-      color: #888;
-    }}
-  }}
-
-  /* ── 헤더 ── */
-  .header {{
-    border-bottom: 2px solid #4A4A8A;
-    padding-bottom: 12px;
-    margin-bottom: 24px;
-  }}
-  .header h1 {{
-    font-size: 20pt;
-    color: #4A4A8A;
-    margin: 0 0 4px 0;
-  }}
-  .header .meta {{
-    font-size: 9pt;
-    color: #666;
-  }}
-
-  /* ── 섹션 ── */
-  .section {{
-    margin-bottom: 20px;
-  }}
-  .section h2 {{
-    font-size: 13pt;
-    color: #4A4A8A;
-    border-left: 4px solid #4A4A8A;
-    padding-left: 8px;
-    margin-bottom: 10px;
-  }}
-  .summary-box {{
-    background: #F5F5FB;
-    border-radius: 6px;
-    padding: 12px 16px;
-    line-height: 1.7;
-  }}
-
-  /* ── 리스트 아이템 ── */
-  .item-list {{
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }}
-  .item-list li {{
-    padding: 7px 10px 7px 30px;
-    position: relative;
-    border-bottom: 0.5px solid #eee;
-    line-height: 1.5;
-  }}
-  .item-list li:last-child {{ border-bottom: none; }}
-  .item-list li::before {{
-    content: attr(data-num);
-    position: absolute;
-    left: 8px;
-    color: #4A4A8A;
-    font-weight: bold;
-  }}
-
-  /* ── 테이블 ── */
-  table {{
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 9.5pt;
-  }}
-  th {{
-    background: #4A4A8A;
-    color: white;
-    padding: 7px 10px;
-    text-align: left;
-  }}
-  td {{
-    padding: 6px 10px;
-    border-bottom: 0.5px solid #ddd;
-  }}
-  tr:nth-child(even) td {{ background: #F8F8FC; }}
-
-  /* ── 이미지 ── */
-  .chart-img {{
-    width: 100%;
-    max-height: 260px;
-    object-fit: contain;
-    margin: 8px 0;
-    page-break-inside: avoid;
-  }}
-
-  /* ── 페이지 나누기 ── */
-  .page-break {{ page-break-after: always; }}
-</style>
-</head>
-<body>
-
-<div class="header">
-  <h1>DAISY 분석 보고서</h1>
-  <div class="meta">생성일시: {generated_at}</div>
-</div>
-
-{summary_html}
-{insights_html}
-{actions_html}
-{viz_html}
-{kpi_html}
-{feature_html}
-{images_html}
-
-</body>
-</html>"""
-
-
-### 섹션 생성 헬퍼 ###
-
-def _section_summary(summary: str) -> str:
-    if not summary:
-        return ""
-    return f"""
-<div class="section">
-  <h2>분석 요약</h2>
-  <div class="summary-box">{summary}</div>
-</div>"""
-
-
-def _section_list(title: str, items: list, css_class: str) -> str:
-    if not items:
-        return ""
-    li_tags = "".join(
-        f'<li data-num="{i+1}.">{item}</li>'
-        for i, item in enumerate(items)
-    )
-    return f"""
-<div class="section">
-  <h2>{title}</h2>
-  <ul class="item-list {css_class}">{li_tags}</ul>
-</div>"""
-
-
-def _section_kpi(kpi: dict) -> str:
-    if not kpi:
-        return ""
-    rows = "".join(
-        f"<tr><td>{k}</td><td>{round(v, 4) if isinstance(v, float) else v}</td></tr>"
-        for k, v in kpi.items()
-    )
-    return f"""
-<div class="section">
-  <h2>KPI 결과</h2>
-  <table>
-    <thead><tr><th>지표</th><th>값</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</div>"""
-
-
-def _section_feature(ranking: dict) -> str:
-    if not ranking:
-        return ""
-    rows = "".join(
-        f"<tr><td>{i+1}</td><td>{feat}</td><td>{score}</td></tr>"
-        for i, (feat, score) in enumerate(list(ranking.items())[:5])
-    )
-    return f"""
-<div class="section">
-  <h2>주요 변수 (상위 5)</h2>
-  <table>
-    <thead><tr><th>순위</th><th>변수명</th><th>중요도</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</div>"""
-
-
-def _section_images(image_paths: list) -> str:
-    if not image_paths:
-        return ""
-    imgs = ""
-    for path in image_paths:
-        p = Path(path)
-        if p.exists() and p.suffix.lower() == ".png":
-            imgs += f'<img class="chart-img" src="{p.resolve()}">'
-    if not imgs:
-        return ""
-    return f"""
-<div class="section">
-  <h2>시각화</h2>
-  {imgs}
-</div>"""
-
-
-### 내부 함수: PDF 생성 ###
-def _build_pdf(output_path: Path, data: dict) -> None:
-    """HTML 템플릿 → weasyprint → PDF"""
+def _build_docx(output_path: Path, data: dict) -> None:
     try:
-        from weasyprint import HTML
+        from docx import Document
+        from docx.shared import Pt, RGBColor, Inches, Cm
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.styles.style import _ParagraphStyle
     except ImportError:
-        raise ImportError(
-            "weasyprint가 설치되어 있지 않습니다.\n"
-            "  uv add weasyprint\n"
-            "  macOS:  brew install cairo pango\n"
-            "  Ubuntu: apt-get install libcairo2 libpango-1.0-0 libpangocairo-1.0-0"
-        )
+        raise ImportError("python-docx 미설치: uv add python-docx")
 
-    html_str = _build_html(data)
-    HTML(string=html_str).write_pdf(str(output_path))
+    BLUE  = RGBColor(0x2E, 0x74, 0xB5)
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    GRAY  = RGBColor(0x70, 0x70, 0x70)
+
+    doc = Document()
+
+    # 페이지 여백
+    sec = doc.sections[0]
+    sec.top_margin    = Cm(2.5)
+    sec.bottom_margin = Cm(2.5)
+    sec.left_margin   = Cm(3)
+    sec.right_margin  = Cm(2.5)
+
+    # 기본 폰트
+    base = doc.styles["Normal"]
+    if isinstance(base, _ParagraphStyle):
+        base.font.name = "맑은 고딕"
+        base.font.size = Pt(10)
+
+    # 제목
+    title = doc.add_heading("DAISY 이커머스 분석 보고서", level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if title.runs:
+        r = title.runs[0]
+        r.font.name = "맑은 고딕"
+        r.font.size = Pt(18)
+        r.font.bold = True
+        r.font.color.rgb = BLUE
+
+    date_p = doc.add_paragraph(f"생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    date_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if date_p.runs:
+        r = date_p.runs[0]
+        r.font.name = "맑은 고딕"
+        r.font.size = Pt(9)
+        r.font.color.rgb = GRAY
+    doc.add_paragraph()
+
+    # 분석 요약
+    if summary := data.get("summary"):
+        _add_section_heading(doc, "분석 요약", BLUE)
+        p = doc.add_paragraph()
+        r = p.add_run(str(summary))
+        r.font.name = "맑은 고딕"
+        r.font.size = Pt(10)
+        doc.add_paragraph()
+
+    # 핵심 인사이트
+    if insights := data.get("insights"):
+        _add_section_heading(doc, "핵심 인사이트", BLUE)
+        for i, insight in enumerate(insights, 1):
+            p = doc.add_paragraph(style="List Number")
+            r = p.add_run(str(insight))
+            r.font.name = "맑은 고딕"
+            r.font.size = Pt(10)
+        doc.add_paragraph()
+
+    # 액션 아이템
+    if actions := data.get("actions"):
+        _add_section_heading(doc, "액션 아이템", BLUE)
+        for action in actions:
+            p = doc.add_paragraph(style="List Bullet")
+            r = p.add_run(str(action))
+            r.font.name = "맑은 고딕"
+            r.font.size = Pt(10)
+        doc.add_paragraph()
+
+    # KPI 테이블
+    if kpi := data.get("kpi_result"):
+        _add_section_heading(doc, "KPI 결과", BLUE)
+        table = doc.add_table(rows=1, cols=2)
+        table.style = "Table Grid"
+        _set_header_row(table.rows[0], ["지표", "값"], BLUE, WHITE)
+        for k, v in kpi.items():
+            row = table.add_row()
+            val = str(round(v, 4)) if isinstance(v, float) else str(v)
+            row.cells[0].text = str(k)
+            row.cells[1].text = val
+            for cell in row.cells:
+                runs = cell.paragraphs[0].runs
+                run  = runs[0] if runs else cell.paragraphs[0].add_run(cell.text)
+                run.font.name = "맑은 고딕"
+                run.font.size = Pt(9)
+        _set_col_widths(table, [Cm(8), Cm(5)])
+        doc.add_paragraph()
+
+    # 변수 중요도 테이블
+    if ranking := data.get("feature_ranking"):
+        _add_section_heading(doc, "주요 변수 (상위 5)", BLUE)
+        table = doc.add_table(rows=1, cols=3)
+        table.style = "Table Grid"
+        _set_header_row(table.rows[0], ["순위", "변수명", "중요도"], BLUE, WHITE)
+        for i, (feat, score) in enumerate(list(ranking.items())[:5], 1):
+            row = table.add_row()
+            row.cells[0].text = str(i)
+            row.cells[1].text = str(feat)
+            row.cells[2].text = str(score)
+            for cell in row.cells:
+                runs = cell.paragraphs[0].runs
+                run  = runs[0] if runs else cell.paragraphs[0].add_run(cell.text)
+                run.font.name = "맑은 고딕"
+                run.font.size = Pt(9)
+        _set_col_widths(table, [Cm(2), Cm(7), Cm(4)])
+        doc.add_paragraph()
+
+    # 시각화 이미지
+    if image_paths := data.get("image_paths"):
+        _add_section_heading(doc, "시각화", BLUE)
+        for img_path in image_paths:
+            p = Path(img_path)
+            if p.exists() and p.suffix.lower() == ".png":
+                doc.add_picture(str(p), width=Inches(5.5))
+                doc.add_paragraph()
+
+    doc.save(str(output_path))
 
 
-### 내부 함수: CSV 생성 ###
+def _add_section_heading(doc, text: str, color) -> None:
+    from docx.shared import Pt
+    h = doc.add_heading(text, level=1)
+    if h.runs:
+        r = h.runs[0]
+        r.font.name  = "맑은 고딕"
+        r.font.size  = Pt(13)
+        r.font.bold  = True
+        r.font.color.rgb = color
+
+
+def _set_header_row(row, headers: list, bg_color, text_color) -> None:
+    from docx.shared import Pt
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    for cell, header in zip(row.cells, headers):
+        cell.text = header
+        runs = cell.paragraphs[0].runs
+        run  = runs[0] if runs else cell.paragraphs[0].add_run(header)
+        run.font.name      = "맑은 고딕"
+        run.font.size      = Pt(9)
+        run.font.bold      = True
+        run.font.color.rgb = text_color
+        tc_pr = cell._tc.get_or_add_tcPr()
+        shd   = OxmlElement("w:shd")
+        shd.set(qn("w:val"),   "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"),
+                f"{bg_color[0]:02X}{bg_color[1]:02X}{bg_color[2]:02X}")
+        tc_pr.append(shd)
+
+
+def _set_col_widths(table, widths: list) -> None:
+    for row in table.rows:
+        for cell, width in zip(row.cells, widths):
+            cell.width = width
+
+
 def _build_csv(output_path: Path, data: dict) -> None:
-    """CSV 보고서 생성"""
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-
         writer.writerow(["항목", "내용"])
         writer.writerow(["생성일시", datetime.now().strftime("%Y-%m-%d %H:%M")])
         writer.writerow([])
-
         if summary := data.get("summary"):
             writer.writerow(["[요약]", summary])
             writer.writerow([])
-
         if insights := data.get("insights"):
             writer.writerow(["[인사이트]"])
             for i, ins in enumerate(insights, 1):
                 writer.writerow([f"{i}.", ins])
             writer.writerow([])
-
         if actions := data.get("actions"):
             writer.writerow(["[액션 아이템]"])
             for i, act in enumerate(actions, 1):
                 writer.writerow([f"{i}.", act])
             writer.writerow([])
-
         if kpi := data.get("kpi_result"):
             writer.writerow(["[KPI]"])
             writer.writerow(["지표", "값"])
             for k, v in kpi.items():
                 writer.writerow([k, v])
             writer.writerow([])
-
         if ranking := data.get("feature_ranking"):
             writer.writerow(["[변수 중요도]"])
             writer.writerow(["순위", "변수명", "중요도"])

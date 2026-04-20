@@ -84,7 +84,8 @@ JSON 형식으로만 반환. 마크다운 금지.
   "sub_intent": "구체적으로 뭘 원하는지 한 줄",
   "params": {
     "task": "eda" | "feature_importance" | "viz" | "insight",
-    "question": "사용자 질문 그대로"
+    "question": "사용자 질문 그대로",
+    "db_url": "AG-03(SQL/DB 조회)일 때만: SQLAlchemy URL 예) sqlite:////절대경로/db.sqlite"
   }
 }
 """
@@ -181,7 +182,8 @@ def _parse_intent(user_input: str, data_meta: dict) -> dict:
         SystemMessage(content=INTENT_SYSTEM),
         HumanMessage(content=msg),
     ])
-    raw = re.sub(r"```(?:json)?|```", "", response.content.strip()).strip()
+    content_str = response.content if isinstance(response.content, str) else str(response.content)
+    raw = re.sub(r"```(?:json)?|```", "", content_str).strip()
 
     try:
         result = json.loads(raw)
@@ -336,16 +338,22 @@ def _generate_response(
             continue
 
         if agent_id == "AG-04":
+            # ReAct 에이전트의 최종 답변이 있으면 우선 사용
+            if result.get("react_answer"):
+                summary_parts.append(f"분석 결과:\n{result['react_answer']}")
+                if result.get("image_paths"):
+                    summary_parts.append(f"차트저장: {result['image_paths']}")
+                continue
+
+            # 기존 방식 fallback
             eda = result.get("eda_result", {})
             if eda:
-                # 질문 맞춤 분석 결과 (채널별, 이상치, 상관관계 등)
                 analysis = eda.get("analysis", {})
                 if analysis and analysis.get("result"):
                     summary_parts.append(
                         f"맞춤 분석 ({analysis.get('type', '')}): "
                         f"{str(analysis.get('result', {}))[:800]}"
                     )
-                # 기본 통계
                 s = eda.get("summary", {})
                 if s:
                     summary_parts.append(
@@ -353,14 +361,12 @@ def _generate_response(
                         f"타겟상관top5={s.get('target_corr_top5')}, "
                         f"이상치={s.get('outlier_ratio')}"
                     )
-
             fi = result.get("feature_importance", {})
             if fi and fi.get("final_ranking"):
                 summary_parts.append(
                     f"변수중요도: {fi.get('final_ranking')}, "
                     f"설명={fi.get('explanation', '')[:300]}"
                 )
-
             if result.get("insights"):
                 summary_parts.append(f"인사이트: {result['insights']}")
             if result.get("actions"):
@@ -389,5 +395,6 @@ def _generate_response(
 
     msg = f"사용자 요청: {user_input}\n\n분석 결과:\n{context}"
 
-    response = llm.invoke([SystemMessage(content=system), HumanMessage(content=msg)])
-    return response.content.strip()
+    response     = llm.invoke([SystemMessage(content=system), HumanMessage(content=msg)])
+    resp_content = response.content if isinstance(response.content, str) else str(response.content)
+    return resp_content.strip()

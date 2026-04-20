@@ -23,9 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
+from typing import Any, Union, cast
 from config import SAMPLE_DATA_DIR, get_session_output_dir
 from graph import graph
 from langgraph.types import Command
+from langchain_core.runnables import RunnableConfig
+from state import GraphState
 
 
 # ── 페르소나 정의 ────────────────────────────────────────────────────
@@ -194,7 +197,7 @@ class Spinner:
     def _spin(self):
         i = 0
         while not self._stop.is_set():
-            elapsed = time.time() - self._start_t
+            elapsed = time.time() - (self._start_t or 0.0)
             frame   = self.FRAMES[i % len(self.FRAMES)]
             print(f"\r  {frame} {self._label} 중...  ({elapsed:.1f}s)", end="", flush=True)
             i += 1
@@ -295,6 +298,76 @@ def handle_hitl(interrupt_value) -> dict:
 
 # ── 단일 턴 실행 ─────────────────────────────────────────────────────
 
+def build_turn_state(
+    user_input: str,
+    session_id: str,
+    data_meta: dict,
+    agent_results: dict,
+    user_profile: dict | None = None,
+) -> dict:
+    """LangGraph 한 턴 입력용 초기 state (CLI / Streamlit 공통)."""
+    return {
+        "session_id":     session_id,
+        "user_input":     user_input,
+        "data_meta":      data_meta,
+        "agent_results":  agent_results,
+        "hitl_history":   [],
+        "hitl_required":  False,
+        "messages":       [],
+        "execution_plan": {},
+        "final_response": "",
+        "next_agent":     "",
+        "current_agent":  "",
+        "user_profile":   user_profile or {},
+    }
+
+
+async def graph_step(
+    stream_input: Union[dict[str, Any], Command],
+    config: dict,
+    agent_results: dict,
+) -> dict[str, Any]:
+    """
+    그래프를 한 번 실행해 interrupt 또는 완료까지 진행한다.
+    Streamlit 등 UI에서 HITL마다 재호출할 때 사용한다.
+
+    Returns:
+        {"status": "interrupt", "interrupt": payload, "agent_results", "final_response"}
+        {"status": "complete", "agent_results", "final_response"}
+    """
+    final_response = ""
+    typed_config = cast(RunnableConfig, config)
+    typed_stream: Union[GraphState, Command] = (
+        cast(GraphState, stream_input) if isinstance(stream_input, dict) else stream_input
+    )
+
+    async for event in graph.astream(typed_stream, config=typed_config, stream_mode="updates"):
+        if "__interrupt__" in event:
+            interrupts = event["__interrupt__"]
+            interrupt_value = interrupts[0].value if interrupts else {}
+            return {
+                "status":          "interrupt",
+                "interrupt":       interrupt_value,
+                "agent_results":   agent_results,
+                "final_response":  final_response,
+            }
+
+        for node_name, node_output in event.items():
+            if node_name.startswith("_"):
+                continue
+            if isinstance(node_output, dict):
+                if node_output.get("final_response"):
+                    final_response = node_output["final_response"]
+                if node_output.get("agent_results"):
+                    agent_results.update(node_output["agent_results"])
+
+    return {
+        "status":          "complete",
+        "agent_results":   agent_results,
+        "final_response":  final_response,
+    }
+
+
 async def run_turn(
     user_input: str,
     session_id: str,
@@ -311,20 +384,13 @@ async def run_turn(
     """
     spinner = Spinner()
 
-    state = {
-        "session_id":     session_id,
-        "user_input":     user_input,
-        "data_meta":      data_meta,
-        "agent_results":  agent_results,
-        "hitl_history":   [],
-        "hitl_required":  False,
-        "messages":       [],
-        "execution_plan": {},
-        "final_response": "",
-        "next_agent":     "",
-        "current_agent":  "",
-        "user_profile":   user_profile or {},
-    }
+    state = build_turn_state(
+        user_input=user_input,
+        session_id=session_id,
+        data_meta=data_meta,
+        agent_results=agent_results,
+        user_profile=user_profile,
+    )
 
     stream_input = state
     final_response = ""
@@ -348,7 +414,9 @@ async def run_turn(
         interrupted     = False
         interrupt_value = None
 
-        async for event in graph.astream(stream_input, config=config, stream_mode="updates"):
+        typed_input  = cast(GraphState, stream_input) if isinstance(stream_input, dict) else stream_input
+        typed_config = cast(RunnableConfig, config)
+        async for event in graph.astream(typed_input, config=typed_config, stream_mode="updates"):
             if "__interrupt__" in event:
                 if current_node:
                     spinner.stop()
@@ -398,7 +466,40 @@ async def run_turn(
     if final_response:
         print(f"\n🤖  {final_response}\n")
 
+    # 차트 자동 열기 (macOS)
+    _auto_open_charts(agent_results)
+
     return agent_results
+
+
+def _auto_open_charts(agent_results: dict) -> None:
+    """생성된 차트 파일 자동으로 열기 (macOS: open 명령어)"""
+    import subprocess
+    import platform
+
+    ag04 = agent_results.get("AG-04", {})
+    image_paths = ag04.get("image_paths", [])
+
+    if not image_paths:
+        return
+
+    print(f"  📊  차트 {len(image_paths)}개 생성됨:")
+    for path in image_paths:
+        p = Path(path)
+        if p.exists():
+            print(f"     {p.name}")
+            if platform.system() == "Darwin":  # macOS
+                subprocess.run(["open", str(p)], check=False)
+
+    # 보고서도 자동 열기
+    ag05 = agent_results.get("AG-05", {})
+    if report_path := ag05.get("report_path", ""):
+        rp = Path(report_path)
+        if rp.exists():
+            print(f"  📄  보고서: {rp.name}")
+            if platform.system() == "Darwin":
+                subprocess.run(["open", str(rp)], check=False)
+    print()
 
 
 # ── 메인 대화 루프 ───────────────────────────────────────────────────

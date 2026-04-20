@@ -22,7 +22,7 @@ from state import GraphState
 from agents.ag01_orchestrator import orchestrator_node, orchestrator_respond_node
 from agents.ag02_fe_agent import fe_agent_node
 from agents.ag03_sql_agent import sql_agent_node
-from agents.ag04_insight_agent import insight_agent_node
+from agents.ag04_react_agent import insight_agent_node
 from agents.ag05_report_agent import report_agent_node
 from human_in_the_loop import HITLPoint, _generate_question_llm, _summarize_context
 from tools.output.t20_trace_logger import log_hitl, log_tool_call

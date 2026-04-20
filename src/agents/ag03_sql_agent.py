@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import DEFAULT_TARGET_COL
+from config import AGENT_BUSINESS_DB_URL, DEFAULT_TARGET_COL
 from state import GraphState
 from tools.database.t10_schema_rag import search_schema
 from tools.database.t9_sql_tool import run_sql
@@ -44,11 +44,20 @@ def sql_agent_node(state: GraphState) -> dict[str, Any]:
     session_id  = state.get("session_id", "")
     user_input  = state.get("user_input", "")
     plan        = state.get("execution_plan", {})
-    ag03_params = plan.get("params", {}).get("AG-03", {})
+    ag03_params = plan.get("params", {}).get("AG-03", {}) or {}
+    intent_params = plan.get("intent_params") or {}
 
-    db_url = ag03_params.get("db_url", "")
+    db_url = (
+        (ag03_params.get("db_url") or "").strip()
+        or (intent_params.get("db_url") or "").strip()
+        or AGENT_BUSINESS_DB_URL
+    )
     if not db_url:
-        error_msg = "AG-03: db_url이 없습니다. execution_plan.params.AG-03.db_url을 설정하세요."
+        error_msg = (
+            "AG-03: db_url이 없습니다. "
+            "의도 JSON의 params.db_url, execution_plan.params.AG-03.db_url, "
+            "또는 환경변수 AGENT_BUSINESS_DB_URL 중 하나를 설정하세요."
+        )
         log_tool_call(session_id, "AG-03_sql_agent", {}, None, error=error_msg)
         current_results = state.get("agent_results", {})
         current_results["AG-03"] = {"error": error_msg, "sql": "", "kpi_result": {}}

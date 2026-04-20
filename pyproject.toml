@@ -10,42 +10,37 @@ dependencies = [
     "numpy>=2.4.4",
     "pandas>=3.0.1",
     "plotly>=6.6.0",
+    "kaleido>=0.2.1",
     "scikit-learn>=1.8.0",
     "seaborn>=0.13.2",
-
-
+    "python-docx>=1.1.0",
     # ── LangGraph / LangChain ────────────────────────────────────────
     "langgraph>=0.2.73",
     "langchain-core>=0.3.0",
     "langchain-google-genai>=2.1.0",
     "langchain-community>=0.3.0",
     "langchain-mcp-adapters>=0.1.0",
-
     # ── MCP 클라이언트 ───────────────────────────────────────────────
     "mcp>=1.6.0",
     "httpx>=0.27.0",
     "httpx-sse>=0.4.0",
-
     # ── 메모리 ───────────────────────────────────────────────────────
     "chromadb>=0.6.0",
     "sqlalchemy>=2.0.0",
-
     # ── 데이터 처리 추가 ─────────────────────────────────────────────
     "openpyxl>=3.1.0",
     "lightgbm>=4.3.0",
-
     # ── 보고서 생성 ──────────────────────────────────────────────────
     "weasyprint>=62.0",
-
     # ── API 서버 ─────────────────────────────────────────────────────
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
-
     # ── 유틸리티 ─────────────────────────────────────────────────────
     "pydantic>=2.7.0",
     "python-dotenv>=1.0.0",
     "aiofiles>=23.2.0",
+    "streamlit>=1.40.0",
 ]
 
 [project.optional-dependencies]
@@ -65,3 +60,4 @@ packages = ["src/daisy"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
