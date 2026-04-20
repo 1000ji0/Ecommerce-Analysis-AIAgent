@@ -551,7 +551,7 @@ async def chat(file_path: Path) -> None:
 
     # 1) 헤더 출력
     print(f"\n{'='*55}")
-    print(f"  DAISY Ecommerce Analysis Agent")
+    print(f"  E_LENS Ecommerce Analysis Agent")
     print(f"{'='*55}")
 
     # 2) 데이터 설명 (업로드 완료 시점)
@@ -622,7 +622,7 @@ def save_upload(file_bytes: bytes, filename: str) -> Path:
 # ── 진입점 ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="DAISY Ecommerce Analysis Agent")
+    parser = argparse.ArgumentParser(description="E_LENS Ecommerce Analysis Agent")
     parser.add_argument(
         "--file",
         type=str,

@@ -1,131 +1,106 @@
 """
-AG-05 Report Generator Agent
-분석 결과 통합 → 페르소나 응답 → 보고서 생성
+AG-05 보고서 생성 에이전트
 
-역할:
-- T-17: 페르소나 응답 생성기 (마케터/분석가 자동 판단)
-- T-18: 보고서 생성기 (PDF/CSV)
-- T-20: SQLite + MD 로깅 + 세션 완료 기록
+지원 포맷:
+  docx — Word 문서 (python-docx)
+  pdf  — PDF 문서 (reportlab)
+
+사용자가 포맷 선택 가능:
+  "보고서 만들어줘"         → 포맷 선택 프롬프트
+  "word로 보고서 만들어줘"  → docx
+  "pdf로 보고서 만들어줘"   → pdf
 """
 from __future__ import annotations
-
+import re
 import time
 from typing import Any
-
-import sys
 from pathlib import Path
+import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from config import DEFAULT_TARGET_COL
 from state import GraphState
-from tools.output.t17_persona_responder import generate_response
 from tools.output.t18_report_gen import generate_report
-from tools.output.t20_trace_logger import log_tool_call, log_final_response
+from tools.output.t20_trace_logger import log_tool_call
 from tools.database.sqlite_store import TraceStore
 
 _store = TraceStore()
 
 
-# ── LangGraph 노드 함수 ──────────────────────────────────────────────
-
 def report_agent_node(state: GraphState) -> dict[str, Any]:
-    """
-    AG-05 메인 노드
-
-    수행 작업:
-    1. 전체 분석 결과 통합
-    2. T-17: 페르소나 응답 생성
-    3. T-18: PDF/CSV 보고서 생성
-    4. T-20: 세션 완료 기록
-    5. HITL ④ 최종 보고서 승인 트리거
-    """
     session_id    = state.get("session_id", "")
     user_input    = state.get("user_input", "")
     plan          = state.get("execution_plan", {})
     agent_results = state.get("agent_results", {})
-    ag05_params   = plan.get("params", {}).get("AG-05", {})
+    is_full       = plan.get("is_full_pipeline", False)
 
-    report_format = ag05_params.get("format", "docx")
+    # ── 포맷 결정 ─────────────────────────────────────────────────
+    report_format = _detect_format(user_input, plan)
 
-    # ── 분석 결과 통합 ───────────────────────────────────────────────
-    ag04_result = agent_results.get("AG-04", {})
-    ag03_result = agent_results.get("AG-03", {})
+    # ── 분석 결과 수집 ─────────────────────────────────────────────
+    ag04 = agent_results.get("AG-04", {})
+    ag03 = agent_results.get("AG-03", {})
 
-    combined = {
-        "summary":         ag04_result.get("summary", ""),
-        "insights":        ag04_result.get("insights", []),
-        "actions":         ag04_result.get("actions", []),
-        "viz_suggestions": ag04_result.get("viz_suggestions", []),
-        "kpi_result":      ag03_result.get("kpi_result", {}),
-        "feature_ranking": ag04_result.get("feature_importance", {}).get("final_ranking", {}),
-        "image_paths":     ag04_result.get("image_paths", []),
+    fi = ag04.get("feature_importance", {})
+    if isinstance(fi, str):
+        import json
+        try:
+            fi = json.loads(fi)
+        except Exception:
+            fi = {}
+
+    analysis_result = {
+        "summary":         ag04.get("summary", ag04.get("react_answer", ""))[:500],
+        "insights":        ag04.get("insights", []),
+        "actions":         ag04.get("actions", []),
+        "viz_suggestions": ag04.get("viz_suggestions", []),
+        "kpi_result":      ag03.get("kpi_result", {}),
+        "feature_ranking": fi.get("final_ranking", {}),
+        "image_paths":     ag04.get("image_paths", []),
     }
 
-    # ── Step 1: T-17 페르소나 응답 ───────────────────────────────────
-    t0 = time.time()
-    persona_result = generate_response(
+    # ── 보고서 생성 ────────────────────────────────────────────────
+    t0     = time.time()
+    result = generate_report(
         session_id=session_id,
-        user_input=user_input,
-        analysis_result=combined,
-    )
-    log_tool_call(
-        session_id=session_id,
-        tool_name="T-17_persona_responder",
-        params={"user_input": user_input},
-        result={"persona": persona_result.get("persona")},
-        latency_ms=int((time.time() - t0) * 1000),
-    )
-
-    final_response = persona_result.get("response", "")
-
-    # 최종 응답 별도 기록 (MD + SQLite)
-    log_final_response(
-        session_id=session_id,
-        response=final_response,
-        persona=persona_result.get("persona"),
-    )
-
-    # ── Step 2: T-18 보고서 생성 ─────────────────────────────────────
-    t0 = time.time()
-    report_result = generate_report(
-        session_id=session_id,
-        analysis_result=combined,
+        analysis_result=analysis_result,
         output_format=report_format,
     )
-    log_tool_call(
-        session_id=session_id,
-        tool_name="T-18_report_gen",
-        params={"format": report_format},
-        result=report_result,
-        error=report_result.get("error") if not report_result.get("success") else None,
-        latency_ms=int((time.time() - t0) * 1000),
-    )
+    log_tool_call(session_id, "AG-05_report_gen",
+                  {"format": report_format},
+                  {"success": result.get("success"),
+                   "path":    result.get("report_path", "")},
+                  latency_ms=int((time.time() - t0) * 1000))
 
-    # ── Step 3: 세션 완료 기록 ───────────────────────────────────────
-    _store.update_session_summary(
-        session_id=session_id,
-        final_output_summary=combined.get("summary", "")[:500],
-        status="completed",
-    )
-
-    # ── 결과 집계 ────────────────────────────────────────────────────
-    result = {
-        "persona":       persona_result.get("persona"),
-        "report_path":   report_result.get("report_path", ""),
-        "report_format": report_format,
-        "success":       report_result.get("success", False),
-    }
-
-    log_tool_call(
-        session_id=session_id,
-        tool_name="AG-05_report_agent_complete",
-        params={},
-        result=result,
-    )
-
-    current_results = {**agent_results, "AG-05": result}
+    result["report_format"] = report_format
+    next_agent = "hitl_final" if is_full else "respond"
 
     return {
-        "agent_results":  current_results,
-        "final_response": final_response,
-        "hitl_required":  True,   # HITL ④ 최종 승인 트리거
+        "agent_results": {**agent_results, "AG-05": result},
+        "current_agent": "AG-05",
+        "next_agent":    next_agent,
     }
+
+
+def _detect_format(user_input: str, plan: dict) -> str:
+    """
+    사용자 입력 or 실행 계획에서 포맷 결정
+    기본값: docx
+    """
+    # 실행 계획에 포맷이 명시된 경우
+    plan_format = plan.get("params", {}).get("AG-05", {}).get("format", "")
+    if plan_format in ("docx", "pdf", "csv"):
+        return plan_format
+
+    q = user_input.lower()
+
+    # PDF 키워드
+    if any(k in q for k in ("pdf", "피디에프")):
+        return "pdf"
+
+    # Word/docx 키워드
+    if any(k in q for k in ("word", "워드", "docx", "doc", "문서")):
+        return "docx"
+
+    # 기본값
+    return "docx"

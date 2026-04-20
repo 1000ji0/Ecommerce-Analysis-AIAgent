@@ -1,10 +1,12 @@
 """
 graph.py — 대화형 에이전트 StateGraph
 
-HITL 구조:
-  - LLM 질문 생성은 human_in_the_loop.py 활용
-  - interrupt()는 graph.py HITL 노드에서 직접 호출
-  - sub-graph의 interrupt()는 메인 그래프로 전파 안 되므로 직접 처리
+HITL 레벨 (0~4):
+  0 — 완전 수동:     모든 HITL 포인트 실행
+  1 — 보조 자동화:   모든 HITL 포인트 실행
+  2 — 부분 자동화:   전체 파이프라인 시에만 (기본값)
+  3 — 조건부 자동화: 실행 안 함 (에러 감지 TODO)
+  4 — 완전 자동화:   HITL 없음
 """
 from __future__ import annotations
 from datetime import datetime, timezone
@@ -24,16 +26,36 @@ from agents.ag02_fe_agent import fe_agent_node
 from agents.ag03_sql_agent import sql_agent_node
 from agents.ag04_react_agent import insight_agent_node
 from agents.ag05_report_agent import report_agent_node
-from human_in_the_loop import HITLPoint, _generate_question_llm, _summarize_context
+from human_in_the_loop import (
+    HITLPoint,
+    _generate_question_llm,
+    _generate_llm_choices,
+    _summarize_context,
+)
 from tools.output.t20_trace_logger import log_hitl, log_tool_call
 from tools.database.sqlite_store import TraceStore
 
 _store = TraceStore()
 
 
-# ── HITL 노드 ────────────────────────────────────────────────────────
-# interrupt()는 반드시 메인 그래프 노드에서 직접 호출해야 함
-# human_in_the_loop.py는 LLM 질문 생성에만 활용
+# ── HITL 레벨 체크 ───────────────────────────────────────────────────
+
+def _should_run_hitl(state: GraphState, hitl_point: str) -> bool:
+    """
+    user_profile.hitl_level에 따라 HITL 실행 여부 결정
+    Level 0, 1 → 항상 실행
+    Level 2     → 전체 파이프라인 시에만 (기본값)
+    Level 3, 4  → 실행 안 함
+    """
+    level   = state.get("user_profile", {}).get("hitl_level", 2)
+    is_full = state.get("execution_plan", {}).get("is_full_pipeline", False)
+
+    if level >= 3:  return False
+    if level == 2:  return is_full
+    return True  # level 0, 1
+
+
+# ── HITL 공통 처리 ───────────────────────────────────────────────────
 
 def _do_hitl(
     state: GraphState,
@@ -43,25 +65,25 @@ def _do_hitl(
 ) -> dict[str, Any]:
     """
     두 단계 HITL 처리:
-    Phase A: LLM 질문 → interrupt() → 자유 텍스트 답변
+    Phase A: LLM 질문 + 동적 선택지 → interrupt()
     Phase B: 결과 요약 → interrupt() → 승인/수정/재실행
     """
     session_id = state.get("session_id", "")
 
     # Phase A — 정보 수집
-    question = _generate_question_llm(
-        task=task,
-        task_context=task_context,
-        hitl_point=hitl_point,
-    )
+    question    = _generate_question_llm(task=task, task_context=task_context,
+                                         hitl_point=hitl_point)
+    llm_choices = _generate_llm_choices(task=task, task_context=task_context,
+                                        hitl_point=hitl_point)
     log_tool_call(session_id, "HITL_phase_a_question",
-                  {"task": task}, {"question": question})
+                  {"task": task}, {"question": question, "choices": llm_choices})
 
-    # Phase A interrupt — 자유 텍스트 입력
+    # Phase A interrupt
     phase_a_payload = {
         "phase":        "A",
         "hitl_point":   hitl_point,
         "llm_question": question,
+        "llm_choices":  llm_choices,   # LLM 동적 선택지
         "input_type":   "free_text",
     }
     raw_a       = interrupt(phase_a_payload)
@@ -106,13 +128,15 @@ def _do_hitl(
     })
 
     log_hitl(session_id, hitl_point, question, response, decision=response)
-
     return {"hitl_history": history, "hitl_required": False}
 
 
+# ── HITL 노드 ─────────────────────────────────────────────────────────
 
 def hitl_plan_node(state: GraphState) -> dict[str, Any]:
     """HITL ① 분석 계획 승인"""
+    if not _should_run_hitl(state, HITLPoint.PLAN.value):
+        return {"hitl_history": state.get("hitl_history", []), "hitl_required": False}
     plan = state.get("execution_plan", {})
     return _do_hitl(
         state=state,
@@ -128,6 +152,8 @@ def hitl_plan_node(state: GraphState) -> dict[str, Any]:
 
 def hitl_preprocess_node(state: GraphState) -> dict[str, Any]:
     """HITL ② 전처리 결과 확인"""
+    if not _should_run_hitl(state, HITLPoint.PREPROCESS.value):
+        return {"hitl_history": state.get("hitl_history", []), "hitl_required": False}
     ag02 = state.get("agent_results", {}).get("AG-02", {})
     return _do_hitl(
         state=state,
@@ -145,6 +171,8 @@ def hitl_preprocess_node(state: GraphState) -> dict[str, Any]:
 
 def hitl_analysis_node(state: GraphState) -> dict[str, Any]:
     """HITL ③ Feature 선정 확인"""
+    if not _should_run_hitl(state, HITLPoint.FEATURE.value):
+        return {"hitl_history": state.get("hitl_history", []), "hitl_required": False}
     ag04 = state.get("agent_results", {}).get("AG-04", {})
     fi   = ag04.get("feature_importance", {})
     return _do_hitl(
@@ -152,9 +180,9 @@ def hitl_analysis_node(state: GraphState) -> dict[str, Any]:
         hitl_point=HITLPoint.FEATURE.value,
         task="변수 중요도 분석 및 Feature 선정",
         task_context={
-            "task":          fi.get("task", ""),
-            "final_ranking": fi.get("final_ranking", {}),
-            "explanation":   fi.get("explanation", "")[:200],
+            "task":          fi.get("task", "") if isinstance(fi, dict) else "",
+            "final_ranking": fi.get("final_ranking", {}) if isinstance(fi, dict) else {},
+            "explanation":   fi.get("explanation", "")[:200] if isinstance(fi, dict) else "",
             "insights":      ag04.get("insights", [])[:3],
             "summary":       ag04.get("summary", "")[:200],
         },
@@ -168,20 +196,28 @@ def hitl_final_node(state: GraphState) -> dict[str, Any]:
     ag04       = state.get("agent_results", {}).get("AG-04", {})
     summary    = ag04.get("summary", "")
 
+    # Level 4는 자동 승인
+    if not _should_run_hitl(state, HITLPoint.FINAL.value):
+        _store.update_session_summary(
+            session_id=session_id,
+            final_output_summary=summary[:500],
+            status="completed",
+        )
+        return {"hitl_history": state.get("hitl_history", []), "hitl_required": False}
+
     result = _do_hitl(
         state=state,
         hitl_point=HITLPoint.FINAL.value,
         task="최종 보고서 생성",
         task_context={
             "report_path":    ag05.get("report_path", ""),
-            "report_format":  ag05.get("report_format", "pdf"),
+            "report_format":  ag05.get("report_format", "docx"),
             "report_summary": summary[:300],
         },
     )
 
-    # LTM 저장 — 최종 승인 시에만
-    history  = result.get("hitl_history", [])
-    last     = history[-1] if history else {}
+    history = result.get("hitl_history", [])
+    last    = history[-1] if history else {}
     if last.get("response") == "승인":
         _store.update_session_summary(
             session_id=session_id,
@@ -299,53 +335,43 @@ def build_graph():
         "hitl_plan":            "hitl_plan",
         "orchestrator_respond": "orchestrator_respond",
     })
-
     builder.add_conditional_edges("hitl_plan", route_after_hitl_plan, {
-        "orchestrator": "orchestrator",
-        "fe_agent":     "fe_agent",
+        "orchestrator": "orchestrator", "fe_agent": "fe_agent",
     })
-
     builder.add_conditional_edges("fe_agent", route_after_fe, {
         "hitl_preprocess":      "hitl_preprocess",
         "insight_agent":        "insight_agent",
         "report_agent":         "report_agent",
         "orchestrator_respond": "orchestrator_respond",
     })
-
     builder.add_conditional_edges("hitl_preprocess", route_after_hitl_preprocess, {
         "orchestrator":  "orchestrator",
         "fe_agent":      "fe_agent",
         "insight_agent": "insight_agent",
     })
-
     builder.add_conditional_edges("insight_agent", route_after_insight, {
         "hitl_analysis":        "hitl_analysis",
         "report_agent":         "report_agent",
         "orchestrator_respond": "orchestrator_respond",
     })
-
     builder.add_conditional_edges("hitl_analysis", route_after_hitl_analysis, {
         "orchestrator":  "orchestrator",
         "insight_agent": "insight_agent",
         "report_agent":  "report_agent",
     })
-
     builder.add_conditional_edges("report_agent", route_after_report, {
         "hitl_final":           "hitl_final",
         "orchestrator_respond": "orchestrator_respond",
     })
-
     builder.add_conditional_edges("hitl_final", route_after_hitl_final, {
         "orchestrator":         "orchestrator",
         "report_agent":         "report_agent",
         "orchestrator_respond": "orchestrator_respond",
     })
-
     builder.add_conditional_edges("sql_agent", route_after_sql, {
         "report_agent":         "report_agent",
         "orchestrator_respond": "orchestrator_respond",
     })
-
     builder.add_edge("orchestrator_respond", END)
 
     return builder.compile(checkpointer=MemorySaver())

@@ -1,235 +1,197 @@
-"""
-T-18 보고서 생성기
-분석 결과 전체를 Word(.docx) / CSV 보고서로 자동 생성
+"""T-18 보고서 생성기 (DOCX / PDF)."""
+from __future__ import annotations
 
-라이브러리: python-docx
-pyproject.toml 추가: "python-docx>=1.1.0"
-"""
-import csv
 import traceback
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from config import SESSION_DIR
-from tools.output.t20_trace_logger import log_tool_call
 
 
-def generate_report(
-    session_id: str,
-    analysis_result: dict,
-    output_format: str = "docx",
-) -> dict:
+def generate_report(session_id: str, analysis_result: dict[str, Any], output_format: str = "docx") -> dict:
+    """분석 결과를 보고서 파일로 저장한다."""
     report_dir = SESSION_DIR / session_id / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename    = f"report_{timestamp}.{output_format}"
-    report_path = report_dir / filename
+    ext = "pdf" if output_format == "pdf" else "docx"
+    output_path = report_dir / f"analysis_report_{datetime.now().strftime('%H%M%S')}.{ext}"
 
     try:
-        if output_format == "docx":
-            _build_docx(report_path, analysis_result)
+        if output_format == "pdf":
+            _build_pdf(output_path, analysis_result)
         else:
-            _build_csv(report_path, analysis_result)
-        result = {"report_path": str(report_path), "success": True, "error": None}
+            _build_docx(output_path, analysis_result)
+        return {"success": True, "report_path": str(output_path), "error": None}
     except Exception:
-        result = {"report_path": "", "success": False, "error": traceback.format_exc()}
-
-    log_tool_call(session_id, "report_gen", {"format": output_format}, result)
-    return result
+        return {"success": False, "report_path": "", "error": traceback.format_exc()}
 
 
-def _build_docx(output_path: Path, data: dict) -> None:
-    try:
-        from docx import Document
-        from docx.shared import Pt, RGBColor, Inches, Cm
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.styles.style import _ParagraphStyle
-    except ImportError:
-        raise ImportError("python-docx 미설치: uv add python-docx")
-
-    BLUE  = RGBColor(0x2E, 0x74, 0xB5)
-    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-    GRAY  = RGBColor(0x70, 0x70, 0x70)
+def _build_docx(output_path: Path, data: dict[str, Any]) -> None:
+    from docx import Document
+    from docx.shared import Inches
 
     doc = Document()
+    doc.add_heading("E_LENS 이커머스 분석 보고서", level=0)
+    doc.add_paragraph(f"생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
-    # 페이지 여백
-    sec = doc.sections[0]
-    sec.top_margin    = Cm(2.5)
-    sec.bottom_margin = Cm(2.5)
-    sec.left_margin   = Cm(3)
-    sec.right_margin  = Cm(2.5)
-
-    # 기본 폰트
-    base = doc.styles["Normal"]
-    if isinstance(base, _ParagraphStyle):
-        base.font.name = "맑은 고딕"
-        base.font.size = Pt(10)
-
-    # 제목
-    title = doc.add_heading("DAISY 이커머스 분석 보고서", level=0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if title.runs:
-        r = title.runs[0]
-        r.font.name = "맑은 고딕"
-        r.font.size = Pt(18)
-        r.font.bold = True
-        r.font.color.rgb = BLUE
-
-    date_p = doc.add_paragraph(f"생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    date_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if date_p.runs:
-        r = date_p.runs[0]
-        r.font.name = "맑은 고딕"
-        r.font.size = Pt(9)
-        r.font.color.rgb = GRAY
-    doc.add_paragraph()
-
-    # 분석 요약
     if summary := data.get("summary"):
-        _add_section_heading(doc, "분석 요약", BLUE)
-        p = doc.add_paragraph()
-        r = p.add_run(str(summary))
-        r.font.name = "맑은 고딕"
-        r.font.size = Pt(10)
-        doc.add_paragraph()
+        doc.add_heading("분석 요약", level=1)
+        doc.add_paragraph(str(summary))
 
-    # 핵심 인사이트
     if insights := data.get("insights"):
-        _add_section_heading(doc, "핵심 인사이트", BLUE)
-        for i, insight in enumerate(insights, 1):
-            p = doc.add_paragraph(style="List Number")
-            r = p.add_run(str(insight))
-            r.font.name = "맑은 고딕"
-            r.font.size = Pt(10)
-        doc.add_paragraph()
+        doc.add_heading("핵심 인사이트", level=1)
+        for ins in insights:
+            doc.add_paragraph(str(ins), style="List Bullet")
 
-    # 액션 아이템
     if actions := data.get("actions"):
-        _add_section_heading(doc, "액션 아이템", BLUE)
-        for action in actions:
-            p = doc.add_paragraph(style="List Bullet")
-            r = p.add_run(str(action))
-            r.font.name = "맑은 고딕"
-            r.font.size = Pt(10)
-        doc.add_paragraph()
+        doc.add_heading("액션 아이템", level=1)
+        for act in actions:
+            doc.add_paragraph(str(act), style="List Bullet")
 
-    # KPI 테이블
     if kpi := data.get("kpi_result"):
-        _add_section_heading(doc, "KPI 결과", BLUE)
+        doc.add_heading("KPI 결과", level=1)
         table = doc.add_table(rows=1, cols=2)
         table.style = "Table Grid"
-        _set_header_row(table.rows[0], ["지표", "값"], BLUE, WHITE)
+        table.rows[0].cells[0].text = "지표"
+        table.rows[0].cells[1].text = "값"
         for k, v in kpi.items():
-            row = table.add_row()
-            val = str(round(v, 4)) if isinstance(v, float) else str(v)
-            row.cells[0].text = str(k)
-            row.cells[1].text = val
-            for cell in row.cells:
-                runs = cell.paragraphs[0].runs
-                run  = runs[0] if runs else cell.paragraphs[0].add_run(cell.text)
-                run.font.name = "맑은 고딕"
-                run.font.size = Pt(9)
-        _set_col_widths(table, [Cm(8), Cm(5)])
-        doc.add_paragraph()
+            row = table.add_row().cells
+            row[0].text = str(k)
+            row[1].text = str(round(v, 4) if isinstance(v, float) else v)
 
-    # 변수 중요도 테이블
     if ranking := data.get("feature_ranking"):
-        _add_section_heading(doc, "주요 변수 (상위 5)", BLUE)
+        doc.add_heading("주요 변수 (상위 5)", level=1)
         table = doc.add_table(rows=1, cols=3)
         table.style = "Table Grid"
-        _set_header_row(table.rows[0], ["순위", "변수명", "중요도"], BLUE, WHITE)
+        table.rows[0].cells[0].text = "순위"
+        table.rows[0].cells[1].text = "변수명"
+        table.rows[0].cells[2].text = "중요도"
         for i, (feat, score) in enumerate(list(ranking.items())[:5], 1):
-            row = table.add_row()
-            row.cells[0].text = str(i)
-            row.cells[1].text = str(feat)
-            row.cells[2].text = str(score)
-            for cell in row.cells:
-                runs = cell.paragraphs[0].runs
-                run  = runs[0] if runs else cell.paragraphs[0].add_run(cell.text)
-                run.font.name = "맑은 고딕"
-                run.font.size = Pt(9)
-        _set_col_widths(table, [Cm(2), Cm(7), Cm(4)])
-        doc.add_paragraph()
+            row = table.add_row().cells
+            row[0].text = str(i)
+            row[1].text = str(feat)
+            row[2].text = str(score)
 
-    # 시각화 이미지
     if image_paths := data.get("image_paths"):
-        _add_section_heading(doc, "시각화", BLUE)
+        doc.add_heading("시각화", level=1)
         for img_path in image_paths:
-            p = Path(img_path)
-            if p.exists() and p.suffix.lower() == ".png":
-                doc.add_picture(str(p), width=Inches(5.5))
-                doc.add_paragraph()
+            p = Path(str(img_path))
+            if p.is_file() and p.suffix.lower() == ".png":
+                doc.add_picture(str(p), width=Inches(5.8))
 
     doc.save(str(output_path))
 
 
-def _add_section_heading(doc, text: str, color) -> None:
-    from docx.shared import Pt
-    h = doc.add_heading(text, level=1)
-    if h.runs:
-        r = h.runs[0]
-        r.font.name  = "맑은 고딕"
-        r.font.size  = Pt(13)
-        r.font.bold  = True
-        r.font.color.rgb = color
+def _build_pdf(output_path: Path, data: dict[str, Any]) -> None:
+    """reportlab 기반 PDF 보고서 생성."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError as exc:
+        raise ImportError("reportlab 미설치: uv add reportlab") from exc
 
+    font_name = "Helvetica"
+    for font_path in [
+        "/System/Library/Fonts/AppleGothic.ttf",
+        "/Library/Fonts/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    ]:
+        p = Path(font_path)
+        if p.exists():
+            try:
+                pdfmetrics.registerFont(TTFont("Korean", str(p)))
+                font_name = "Korean"
+                break
+            except Exception:
+                continue
 
-def _set_header_row(row, headers: list, bg_color, text_color) -> None:
-    from docx.shared import Pt
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-    for cell, header in zip(row.cells, headers):
-        cell.text = header
-        runs = cell.paragraphs[0].runs
-        run  = runs[0] if runs else cell.paragraphs[0].add_run(header)
-        run.font.name      = "맑은 고딕"
-        run.font.size      = Pt(9)
-        run.font.bold      = True
-        run.font.color.rgb = text_color
-        tc_pr = cell._tc.get_or_add_tcPr()
-        shd   = OxmlElement("w:shd")
-        shd.set(qn("w:val"),   "clear")
-        shd.set(qn("w:color"), "auto")
-        shd.set(qn("w:fill"),
-                f"{bg_color[0]:02X}{bg_color[1]:02X}{bg_color[2]:02X}")
-        tc_pr.append(shd)
+    doc = SimpleDocTemplate(
+        str(output_path),
+        pagesize=A4,
+        leftMargin=2.5 * cm,
+        rightMargin=2.5 * cm,
+        topMargin=2.0 * cm,
+        bottomMargin=2.0 * cm,
+    )
+    story: list[Any] = []
+    blue = colors.HexColor("#2E74B5")
+    gray = colors.HexColor("#707070")
 
+    title_style = ParagraphStyle("title", fontName=font_name, fontSize=18, textColor=blue, alignment=1, spaceAfter=8)
+    date_style = ParagraphStyle("date", fontName=font_name, fontSize=9, textColor=gray, alignment=1, spaceAfter=12)
+    h1_style = ParagraphStyle("h1", fontName=font_name, fontSize=12, textColor=blue, spaceBefore=12, spaceAfter=6)
+    body_style = ParagraphStyle("body", fontName=font_name, fontSize=10, leading=15, spaceAfter=4)
+    bullet_style = ParagraphStyle("bullet", fontName=font_name, fontSize=10, leading=15, leftIndent=12)
 
-def _set_col_widths(table, widths: list) -> None:
-    for row in table.rows:
-        for cell, width in zip(row.cells, widths):
-            cell.width = width
+    story.append(Paragraph("E_LENS 이커머스 분석 보고서", title_style))
+    story.append(Paragraph(f"생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}", date_style))
+    story.append(HRFlowable(width="100%", thickness=1, color=blue))
+    story.append(Spacer(1, 10))
 
+    if summary := data.get("summary"):
+        story.append(Paragraph("분석 요약", h1_style))
+        story.append(Paragraph(str(summary), body_style))
 
-def _build_csv(output_path: Path, data: dict) -> None:
-    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow(["항목", "내용"])
-        writer.writerow(["생성일시", datetime.now().strftime("%Y-%m-%d %H:%M")])
-        writer.writerow([])
-        if summary := data.get("summary"):
-            writer.writerow(["[요약]", summary])
-            writer.writerow([])
-        if insights := data.get("insights"):
-            writer.writerow(["[인사이트]"])
-            for i, ins in enumerate(insights, 1):
-                writer.writerow([f"{i}.", ins])
-            writer.writerow([])
-        if actions := data.get("actions"):
-            writer.writerow(["[액션 아이템]"])
-            for i, act in enumerate(actions, 1):
-                writer.writerow([f"{i}.", act])
-            writer.writerow([])
-        if kpi := data.get("kpi_result"):
-            writer.writerow(["[KPI]"])
-            writer.writerow(["지표", "값"])
-            for k, v in kpi.items():
-                writer.writerow([k, v])
-            writer.writerow([])
-        if ranking := data.get("feature_ranking"):
-            writer.writerow(["[변수 중요도]"])
-            writer.writerow(["순위", "변수명", "중요도"])
-            for i, (feat, score) in enumerate(list(ranking.items())[:5], 1):
-                writer.writerow([i, feat, score])
+    if insights := data.get("insights"):
+        story.append(Paragraph("핵심 인사이트", h1_style))
+        for ins in insights:
+            story.append(Paragraph(f"• {ins}", bullet_style))
+
+    if actions := data.get("actions"):
+        story.append(Paragraph("액션 아이템", h1_style))
+        for act in actions:
+            story.append(Paragraph(f"• {act}", bullet_style))
+
+    if kpi := data.get("kpi_result"):
+        story.append(Paragraph("KPI 결과", h1_style))
+        rows = [["지표", "값"]]
+        for k, v in kpi.items():
+            rows.append([str(k), str(round(v, 4) if isinstance(v, float) else v)])
+        table = Table(rows, colWidths=[8 * cm, 5 * cm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), blue),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, -1), font_name),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                ]
+            )
+        )
+        story.append(table)
+
+    if ranking := data.get("feature_ranking"):
+        story.append(Paragraph("주요 변수 (상위 5)", h1_style))
+        rows = [["순위", "변수명", "중요도"]]
+        for i, (feat, score) in enumerate(list(ranking.items())[:5], 1):
+            rows.append([str(i), str(feat), str(score)])
+        table = Table(rows, colWidths=[2 * cm, 8 * cm, 3 * cm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), blue),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, -1), font_name),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                ]
+            )
+        )
+        story.append(table)
+
+    if image_paths := data.get("image_paths"):
+        story.append(Paragraph("시각화", h1_style))
+        for img_path in image_paths:
+            p = Path(str(img_path))
+            if p.is_file() and p.suffix.lower() == ".png":
+                story.append(Image(str(p), width=14 * cm, height=8.5 * cm))
+                story.append(Spacer(1, 6))
+
+    doc.build(story)

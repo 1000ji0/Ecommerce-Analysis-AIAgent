@@ -1,7 +1,7 @@
 [project]
 name = "agent-dev"
 version = "0.1.0"
-description = "DAISY Feature Engineering Agent — LangGraph + Gemini 2.5 Flash"
+description = "E_LENS Feature Engineering Agent — LangGraph + Gemini 2.5 Flash"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -41,6 +41,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "aiofiles>=23.2.0",
     "streamlit>=1.40.0",
+    "reportlab>=4.4.10",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +56,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/daisy"]
+packages = ["src/elens"]
 
 [tool.ruff]
 line-length = 100

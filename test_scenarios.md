@@ -1,4 +1,4 @@
-# DAISY Ecommerce Analysis Agent — 테스트 시나리오
+# E_LENS Ecommerce Analysis Agent — 테스트 시나리오
 
 > 파일: `data/sample/ecommerce_sample.csv` (500행 × 14컬럼)  
 > 실행: `python main.py --file data/sample/ecommerce_sample.csv`
