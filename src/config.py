@@ -8,6 +8,24 @@ import os
 
 load_dotenv()
 
+try:
+    import streamlit as st
+except Exception:
+    st = None
+
+
+def _get_secret_or_env(key: str, default: str = "") -> str:
+    """Streamlit secrets -> environment variable -> default 순서로 값 조회."""
+    if st is not None:
+        try:
+            if hasattr(st, "secrets") and key in st.secrets:
+                value = st.secrets[key]
+                if value is not None:
+                    return str(value)
+        except Exception:
+            pass
+    return os.getenv(key, default)
+
 # ── 프로젝트 경로 ────────────────────────────────────────────────────
 ROOT_DIR   = Path(__file__).resolve().parent.parent   # agent_dev/
 SRC_DIR    = ROOT_DIR / "src"
@@ -51,20 +69,20 @@ def get_session_output_dir(session_id: str) -> Path:
 
 
 # ── LLM 설정 ─────────────────────────────────────────────────────────
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_API_KEY = _get_secret_or_env("GOOGLE_API_KEY", "")
 GEMINI_MODEL   = "gemini-2.5-flash"
 
 # AG-03 SQL 에이전트용 비즈니스 DB (오케스트레이터 플랜에 db_url이 없을 때 대체)
 # 예: sqlite:////absolute/path/to/app.db  또는 mysql+pymysql://user:pass@host/db
-AGENT_BUSINESS_DB_URL = os.getenv("AGENT_BUSINESS_DB_URL", "").strip()
+AGENT_BUSINESS_DB_URL = _get_secret_or_env("AGENT_BUSINESS_DB_URL", "").strip()
 
 # ── MCP 서버 ─────────────────────────────────────────────────────────
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000/sse")
+MCP_SERVER_URL = _get_secret_or_env("MCP_SERVER_URL", "http://127.0.0.1:8000/sse")
 
 # ── 데이터 기본값 ────────────────────────────────────────────────────
 DEFAULT_TARGET_COL = "TARGET"
 
 # ── LangSmith ────────────────────────────────────────────────────────
-os.environ["LANGCHAIN_API_KEY"]    = os.getenv("LANGCHAIN_API_KEY", "")
-os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGCHAIN_TRACING_V2", "false")
-os.environ["LANGCHAIN_PROJECT"]    = os.getenv("LANGCHAIN_PROJECT", "ecommerce-analysis-agent")
+os.environ["LANGCHAIN_API_KEY"]    = _get_secret_or_env("LANGCHAIN_API_KEY", "")
+os.environ["LANGCHAIN_TRACING_V2"] = _get_secret_or_env("LANGCHAIN_TRACING_V2", "false")
+os.environ["LANGCHAIN_PROJECT"]    = _get_secret_or_env("LANGCHAIN_PROJECT", "ecommerce-analysis-agent")

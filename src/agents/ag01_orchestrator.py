@@ -38,6 +38,45 @@ def _get_llm():
     return _llm
 
 
+def _fallback_intent(user_input: str) -> dict:
+    """Gemini 호출 실패 시 사용할 규칙 기반 의도 판별."""
+    text = user_input.lower()
+
+    if any(kw in text for kw in ("전체 분석", "처음부터 끝까지", "all in one", "풀파이프라인", "full pipeline")):
+        return {
+            "intent": "FULL_PIPELINE",
+            "sub_intent": user_input,
+            "params": {"task": "pipeline", "question": user_input},
+        }
+
+    if any(kw in text for kw in ("sql", "db", "데이터베이스", "쿼리", "조회", "테이블")):
+        return {
+            "intent": "AG-03",
+            "sub_intent": user_input,
+            "params": {"task": "sql", "question": user_input},
+        }
+
+    if any(kw in text for kw in ("보고서", "pdf", "csv", "리포트")):
+        return {
+            "intent": "AG-05",
+            "sub_intent": user_input,
+            "params": {"task": "report", "question": user_input},
+        }
+
+    if any(kw in text for kw in ("전처리", "정제", "피처", "feature engineering", "파이프라인")):
+        return {
+            "intent": "AG-02",
+            "sub_intent": user_input,
+            "params": {"task": "preprocess", "question": user_input},
+        }
+
+    return {
+        "intent": "AG-04",
+        "sub_intent": user_input,
+        "params": {"task": "eda", "question": user_input},
+    }
+
+
 def _init_session(state: GraphState) -> str:
     session_id = state.get("session_id", "")
     if not session_id:
@@ -178,25 +217,24 @@ def _parse_intent(user_input: str, data_meta: dict) -> dict:
     cols = data_meta.get("preview", {}).get("columns", [])
     msg  = f"데이터 컬럼: {cols}\n사용자: {user_input}"
 
-    response = llm.invoke([
-        SystemMessage(content=INTENT_SYSTEM),
-        HumanMessage(content=msg),
-    ])
-    content_str = response.content if isinstance(response.content, str) else str(response.content)
-    raw = re.sub(r"```(?:json)?|```", "", content_str).strip()
-
     try:
-        result = json.loads(raw)
-        valid  = {"AG-02", "AG-03", "AG-04", "AG-05", "FULL_PIPELINE", "NONE"}
-        if result.get("intent") not in valid:
-            result["intent"] = "AG-04"
-        return result
-    except json.JSONDecodeError:
-        return {
-            "intent":     "AG-04",
-            "sub_intent": user_input,
-            "params":     {"task": "eda", "question": user_input},
-        }
+        response = llm.invoke([
+            SystemMessage(content=INTENT_SYSTEM),
+            HumanMessage(content=msg),
+        ])
+        content_str = response.content if isinstance(response.content, str) else str(response.content)
+        raw = re.sub(r"```(?:json)?|```", "", content_str).strip()
+
+        try:
+            result = json.loads(raw)
+            valid  = {"AG-02", "AG-03", "AG-04", "AG-05", "FULL_PIPELINE", "NONE"}
+            if result.get("intent") not in valid:
+                result["intent"] = "AG-04"
+            return result
+        except json.JSONDecodeError:
+            return _fallback_intent(user_input)
+    except Exception:
+        return _fallback_intent(user_input)
 
 
 def _map_intent_to_agent(intent: dict) -> str:
@@ -395,6 +433,23 @@ def _generate_response(
 
     msg = f"사용자 요청: {user_input}\n\n분석 결과:\n{context}"
 
-    response     = llm.invoke([SystemMessage(content=system), HumanMessage(content=msg)])
-    resp_content = response.content if isinstance(response.content, str) else str(response.content)
-    return resp_content.strip()
+    try:
+        response     = llm.invoke([SystemMessage(content=system), HumanMessage(content=msg)])
+        resp_content = response.content if isinstance(response.content, str) else str(response.content)
+        return resp_content.strip()
+    except Exception:
+        # Gemini API 오류가 나도 최소한의 요약은 반환
+        fallback_lines = []
+        for agent_id, result in agent_results.items():
+            if not result or "error" in result:
+                continue
+            if agent_id == "AG-04" and result.get("react_answer"):
+                fallback_lines.append(result["react_answer"])
+            elif agent_id == "AG-05" and result.get("report_path"):
+                fallback_lines.append(f"보고서가 생성되었습니다: {result['report_path']}")
+            elif agent_id == "AG-03" and result.get("kpi_result"):
+                fallback_lines.append(f"KPI 결과: {result['kpi_result']}")
+
+        if fallback_lines:
+            return "\n".join(fallback_lines)
+        return "현재 LLM 응답을 불러오지 못했습니다. 다시 시도해 주세요."

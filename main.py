@@ -254,7 +254,7 @@ def handle_hitl(interrupt_value) -> dict:
     if user_req:
         print(f"\n  반영된 요구사항: {user_req}")
 
-    if context:
+    if isinstance(context, dict) and context:
         import json
         print("\n  [상세 결과]")
         skip_keys = {"context_summary", "user_requirements", "user_answer"}
