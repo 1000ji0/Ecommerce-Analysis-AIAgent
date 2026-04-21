@@ -982,12 +982,13 @@ def _render_hitl() -> None:
             resume["user_answer"]    = modify.strip()
             resume["modified_input"] = {"user_input": modify.strip()}
 
-    with st.spinner(""):
-        result = asyncio.run(graph_step(
-            Command(resume=resume),
-            st.session_state.graph_config,
-            st.session_state.agent_results,
-        ))
+    with st.chat_message("assistant", avatar="🔭"):
+        with st.spinner("⏳ 추론 중입니다... 잠시만 기다려주세요"):
+            result = asyncio.run(graph_step(
+                Command(resume=resume),
+                st.session_state.graph_config,
+                st.session_state.agent_results,
+            ))
     _apply_result(result)
     st.rerun()
 
@@ -1018,18 +1019,19 @@ def _run_prompt(prompt: str) -> None:
     st.session_state.messages.append({"role": "user", "content": prompt})
     if session_id:
         _safe_log_chat_message(session_id=session_id, role="user", content=prompt)
-    with st.spinner(""):
-        result = asyncio.run(graph_step(
-            build_turn_state(
-                user_input=prompt,
-                session_id=st.session_state.session_id,
-                data_meta=st.session_state.data_meta,
-                agent_results=st.session_state.agent_results,
-                user_profile=st.session_state.user_profile,
-            ),
-            st.session_state.graph_config,
-            st.session_state.agent_results,
-        ))
+    with st.chat_message("assistant", avatar="🔭"):
+        with st.spinner("⏳ 추론 중입니다... 잠시만 기다려주세요"):
+            result = asyncio.run(graph_step(
+                build_turn_state(
+                    user_input=prompt,
+                    session_id=st.session_state.session_id,
+                    data_meta=st.session_state.data_meta,
+                    agent_results=st.session_state.agent_results,
+                    user_profile=st.session_state.user_profile,
+                ),
+                st.session_state.graph_config,
+                st.session_state.agent_results,
+            ))
     _apply_result(result)
 
 
@@ -1161,6 +1163,8 @@ def main() -> None:
     else:
         # 채팅 입력
         if prompt := st.chat_input("무엇을 분석할까요?"):
+            with st.chat_message("user"):
+                st.markdown(prompt)
             _run_prompt(prompt)
             st.rerun()
 
