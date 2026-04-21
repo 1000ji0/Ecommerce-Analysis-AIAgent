@@ -4,7 +4,9 @@ E_LENS 이커머스 분석 에이전트 — Streamlit UI
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
@@ -22,14 +24,89 @@ for _candidate in [
     if _candidate.exists() and _p not in sys.path:
         sys.path.insert(0, _p)
 
-from config import GOOGLE_API_KEY, SAMPLE_DATA_DIR
+import config as app_config
 from auth.auth import ensure_db, is_logged_in, get_current_user, logout, render_login_page
-from auth.auth_db import save_session, update_session, get_sessions_by_user
+from auth.auth_db import (
+    save_session,
+    update_session,
+    get_sessions_by_user,
+)
+
+try:
+    from auth.auth_db import check_prompt_limit, record_prompt_usage, get_prompt_usage
+except Exception:
+    def _today_key() -> str:
+        return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+
+    def _usage_bucket() -> dict:
+        if "_llm_usage_fallback" not in st.session_state:
+            st.session_state["_llm_usage_fallback"] = {"session": {}, "daily": {}}
+        return st.session_state["_llm_usage_fallback"]
+
+    def get_prompt_usage(user_id: int, session_id: str) -> tuple[int, int]:
+        usage = _usage_bucket()
+        session_count = int(usage["session"].get(str(session_id), 0))
+        daily_key = f"{_today_key()}:{user_id}"
+        daily_count = int(usage["daily"].get(daily_key, 0))
+        return session_count, daily_count
+
+    def check_prompt_limit(
+        user_id: int,
+        session_id: str,
+        *,
+        session_limit: int,
+        daily_limit: int,
+    ) -> tuple[bool, str, int, int]:
+        session_count, daily_count = get_prompt_usage(user_id=user_id, session_id=session_id)
+
+        if session_limit > 0 and session_count >= session_limit:
+            return False, f"세션당 호출 제한({session_limit}회)에 도달했습니다.", session_count, daily_count
+        if daily_limit > 0 and daily_count >= daily_limit:
+            return False, f"사용자 일일 호출 제한({daily_limit}회)에 도달했습니다.", session_count, daily_count
+        return True, "", session_count, daily_count
+
+    def record_prompt_usage(user_id: int, session_id: str) -> tuple[int, int]:
+        usage = _usage_bucket()
+        sid = str(session_id)
+        usage["session"][sid] = int(usage["session"].get(sid, 0)) + 1
+
+        daily_key = f"{_today_key()}:{user_id}"
+        usage["daily"][daily_key] = int(usage["daily"].get(daily_key, 0)) + 1
+        return get_prompt_usage(user_id=user_id, session_id=session_id)
+from tools.database.sqlite_store import TraceStore
 from main import (
     PERSONA_GUIDE, PURPOSES, ROLES,
     _make_data_meta, build_turn_state, graph_step,
     make_session_id, save_upload,
 )
+
+try:
+    from tools.output import t20_trace_logger as _trace_logger
+except Exception:
+    _trace_logger = None
+
+
+def _safe_log_chat_message(session_id: str, role: str, content: str) -> None:
+    if not _trace_logger:
+        return
+    fn = getattr(_trace_logger, "log_chat_message", None)
+    if not callable(fn):
+        return
+    try:
+        fn(session_id=session_id, role=role, content=content)
+    except Exception:
+        pass
+
+_trace_store = TraceStore()
+
+GOOGLE_API_KEY = getattr(app_config, "GOOGLE_API_KEY", "")
+SAMPLE_DATA_DIR = getattr(
+    app_config,
+    "SAMPLE_DATA_DIR",
+    Path(__file__).resolve().parents[2] / "data" / "sample",
+)
+LLM_SESSION_CALL_LIMIT = int(getattr(app_config, "LLM_SESSION_CALL_LIMIT", 30) or 30)
+LLM_DAILY_CALL_LIMIT = int(getattr(app_config, "LLM_DAILY_CALL_LIMIT", 120) or 120)
 
 HITL_LEVELS = {
     0: ("완전 수동",      "모든 단계 직접 확인"),
@@ -149,18 +226,19 @@ def _inject_css() -> None:
 
     /* 메인 버튼 — 밝은 스타일 */
     [data-testid="stMain"] .stButton > button {
-        background: var(--card) !important;
-        border: 1.5px solid var(--card-bd) !important;
-        color: var(--ink) !important;
+        background: #ffffff !important;
+        border: 1.5px solid #cbd5e1 !important;
+        color: #111827 !important;
         border-radius: 12px !important;
         padding: 0.5rem 1rem !important;
         font-weight: 600 !important;
         transition: all 0.18s ease !important;
-        box-shadow: 0 6px 18px rgba(4,10,22,0.28) !important;
+        box-shadow: 0 6px 18px rgba(4,10,22,0.18) !important;
     }
     [data-testid="stMain"] .stButton > button:hover {
         border-color: #06b6d4 !important;
-        box-shadow: 0 6px 18px rgba(6,182,212,0.15) !important;
+        background: #f8fafc !important;
+        box-shadow: 0 6px 18px rgba(6,182,212,0.12) !important;
         transform: translateY(-1px) !important;
     }
     [data-testid="stMain"] .stButton > button[kind="primary"] {
@@ -187,6 +265,10 @@ def _inject_css() -> None:
         display: flex;
         align-items: center;
         gap: 12px;
+    }
+    .elens-card,
+    .elens-card * {
+        color: #f8fafc !important;
     }
     .elens-card:hover, .elens-card.selected {
         border-color: var(--cyan);
@@ -229,6 +311,10 @@ def _inject_css() -> None:
         padding: 1.7rem 1.8rem 1.5rem;
         box-shadow: 0 20px 46px rgba(4,10,22,0.45);
         backdrop-filter: blur(5px);
+    }
+    .hero-card,
+    .hero-card * {
+        color: #f8fafc !important;
     }
     .hero-kicker {
         display: inline-block;
@@ -281,6 +367,10 @@ def _inject_css() -> None:
         align-items: center;
         margin-bottom: 12px;
     }
+    .step-title,
+    .step-title * {
+        color: #f8fafc !important;
+    }
 
     /* 업로드 존 */
     [data-testid="stFileUploader"] {
@@ -300,6 +390,10 @@ def _inject_css() -> None:
         padding: 12px 14px;
         margin-bottom: 8px;
         font-size: 0.82rem;
+    }
+    .session-card,
+    .session-card * {
+        color: #f8fafc !important;
     }
     .session-card .s-time { color: var(--muted); font-size: 0.75rem; }
     .session-card .s-tag  {
@@ -329,33 +423,33 @@ def _inject_css() -> None:
         background: #06b6d4 !important;
     }
 
-    /* 채팅 메시지 영역 — 어두운 배경이면 흰색 글씨 */
+    /* 채팅 메시지 영역 — 흰색 말풍선 + 검정 글씨 */
     [data-testid="stChatMessage"] {
-        background: var(--card) !important;
+        background: #ffffff !important;
         border-radius: 14px !important;
-        border: 1px solid var(--card-bd) !important;
-        color: #f8fafc !important;
+        border: 1px solid #d1d5db !important;
+        color: #111827 !important;
         margin-bottom: 10px !important;
-        box-shadow: 0 10px 22px rgba(4,10,22,0.32) !important;
+        box-shadow: 0 10px 22px rgba(4,10,22,0.22) !important;
     }
     [data-testid="stChatMessage"] p,
     [data-testid="stChatMessage"] span,
     [data-testid="stChatMessage"] div {
-        color: #f8fafc !important;
+        color: #111827 !important;
         line-height: 1.5 !important;
     }
     [data-testid="stChatMessage"] *,
     [data-testid="stChatMessageContent"] *,
     [data-testid="stChatMessage"] a {
-        color: #f8fafc !important;
+        color: #111827 !important;
     }
     [data-testid="stChatMessage"][data-testid*="user"] {
-        background: var(--card-soft) !important;
-        border-color: #386aa2 !important;
+        background: #ffffff !important;
+        border-color: #d1d5db !important;
     }
     [data-testid="stChatMessage"][data-testid*="user"] *,
     [data-testid="stChatMessage"][data-testid*="assistant"] * {
-        color: #f8fafc !important;
+        color: #111827 !important;
     }
 
     /* 밝은 표면에서는 검정 글씨 */
@@ -401,6 +495,10 @@ def _inject_css() -> None:
         margin-bottom: 12px;
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
     }
+    .sidebar-account,
+    .sidebar-account * {
+        color: #f8fafc !important;
+    }
     .sidebar-account .name {
         font-weight: 600;
         font-size: 0.95rem;
@@ -421,6 +519,13 @@ def _inject_css() -> None:
     [data-testid="stMain"] div {
         color: var(--ink) !important;
     }
+    [data-testid="stChatMessage"],
+    [data-testid="stChatMessage"] p,
+    [data-testid="stChatMessage"] span,
+    [data-testid="stChatMessage"] div,
+    [data-testid="stChatMessage"] a {
+        color: #111827 !important;
+    }
 
     .chat-top-wrap {
         margin-bottom: 0.9rem;
@@ -431,6 +536,10 @@ def _inject_css() -> None:
         border-radius: 16px;
         padding: 1rem 1.05rem 0.95rem;
         box-shadow: 0 10px 24px rgba(4, 10, 22, 0.26);
+    }
+    .chat-top,
+    .chat-top * {
+        color: #f8fafc !important;
     }
     .chat-top-title {
         font-family: 'Sora', sans-serif;
@@ -464,6 +573,18 @@ def _inject_css() -> None:
         margin-bottom: 0.35rem;
         color: #9fb3ca;
         font-size: 0.8rem;
+    }
+    .sample-attach-card {
+        background: linear-gradient(160deg, rgba(17,27,48,0.98), rgba(13,21,38,0.96));
+        border: 1px solid #2e466c;
+        border-radius: 14px;
+        padding: 0.9rem 1rem;
+        margin-bottom: 0.8rem;
+        box-shadow: 0 10px 24px rgba(4,10,22,0.22);
+    }
+    .sample-attach-card,
+    .sample-attach-card * {
+        color: #f8fafc !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -554,6 +675,88 @@ def _append_assistant(text: str) -> None:
         "role": "assistant", "content": text,
         "image_paths": _collect_chart_paths(),
     })
+    session_id = st.session_state.get("session_id")
+    if session_id:
+        _safe_log_chat_message(session_id=session_id, role="assistant", content=text)
+
+
+def _session_chat_preview(session_id: str, max_items: int = 4) -> list[str]:
+    """세션 trace_events에서 최근 대화 미리보기 추출."""
+    try:
+        events = _trace_store.get_trace_events(session_id)
+    except Exception:
+        return []
+
+    previews: list[str] = []
+    for event in events:
+        if event.get("event_type") != "chat_message":
+            continue
+        payload_raw = event.get("output_payload")
+        if not payload_raw:
+            continue
+        try:
+            payload = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
+        except Exception:
+            continue
+
+        role = str(payload.get("role", "")).strip()
+        content = str(payload.get("content", "")).strip().replace("\n", " ")
+        if not content:
+            continue
+        role_kr = "사용자" if role == "user" else "어시스턴트" if role == "assistant" else role
+        previews.append(f"{role_kr}: {content[:90]}")
+
+    return previews[-max_items:]
+
+
+def _trace_md_path(session_id: str) -> Path:
+    return Path(__file__).resolve().parents[2] / "logs" / "sessions" / session_id / "trace.md"
+
+
+def _render_downloads_panel() -> None:
+    """현재 세션의 trace/report 다운로드 UI."""
+    if not _session_ready():
+        return
+
+    session_id = str(st.session_state.get("session_id") or "")
+    if not session_id:
+        return
+
+    trace_path = _trace_md_path(session_id)
+    ag05 = (st.session_state.get("agent_results") or {}).get("AG-05", {})
+    report_path_raw = ag05.get("report_path", "") if isinstance(ag05, dict) else ""
+    report_path = Path(str(report_path_raw)) if report_path_raw else None
+
+    has_trace = trace_path.exists()
+    has_report = bool(report_path and report_path.exists())
+    if not has_trace and not has_report:
+        return
+
+    with st.expander("파일 다운로드", expanded=False):
+        if has_trace:
+            st.download_button(
+                "🧠 Reasoning Trace (.md) 다운로드",
+                data=trace_path.read_bytes(),
+                file_name=trace_path.name,
+                mime="text/markdown",
+                use_container_width=True,
+                key=f"dl_trace_{session_id}",
+            )
+        if has_report and report_path is not None:
+            suffix = report_path.suffix.lower()
+            mime = {
+                ".pdf": "application/pdf",
+                ".md": "text/markdown",
+                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }.get(suffix, "application/octet-stream")
+            st.download_button(
+                f"📄 분석 보고서 ({suffix or '.file'}) 다운로드",
+                data=report_path.read_bytes(),
+                file_name=report_path.name,
+                mime=mime,
+                use_container_width=True,
+                key=f"dl_report_{session_id}",
+            )
 
 
 def _apply_result(result: dict) -> None:
@@ -607,17 +810,29 @@ def _render_onboarding() -> None:
             st.markdown('<div class="step-title"><span class="step-badge">1</span>분석할 CSV 파일을 올려주세요.</div>', unsafe_allow_html=True)
 
             sample_files = sorted(SAMPLE_DATA_DIR.glob("*.csv"))
-            col1, col2   = st.columns([3, 2])
+            col1, col2   = st.columns([4, 1])
+
+            if sample_files:
+                sample_name = sample_files[0].name
+                st.markdown(
+                    f"""
+                    <div class="sample-attach-card">
+                        <div><b>샘플 데이터 첨부</b></div>
+                        <div style="font-size:0.82rem; opacity:0.9; margin-top:0.2rem;">{sample_name}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button("📎 샘플 데이터 첨부", use_container_width=True, key="attach_sample"):
+                    st.session_state.onboard_file = str(sample_files[0])
+                    st.session_state.onboard_step = 2
+                    st.rerun()
 
             with col1:
                 uploaded = st.file_uploader("CSV 파일", type=["csv"],
                                              label_visibility="collapsed")
             with col2:
-                if sample_files:
-                    if st.button("📂 샘플 데이터 사용", use_container_width=True):
-                        st.session_state.onboard_file = str(sample_files[0])
-                        st.session_state.onboard_step = 2
-                        st.rerun()
+                st.empty()
 
             if uploaded:
                 path = save_upload(uploaded.getvalue(), uploaded.name)
@@ -778,7 +993,31 @@ def _render_hitl() -> None:
 
 
 def _run_prompt(prompt: str) -> None:
+    user = get_current_user()
+    if not user:
+        st.warning("로그인 정보를 확인할 수 없어 요청을 실행할 수 없습니다.")
+        return
+
+    session_id = st.session_state.get("session_id")
+    if not session_id:
+        st.warning("세션 정보가 없어 요청을 실행할 수 없습니다.")
+        return
+
+    allowed, message, _, _ = check_prompt_limit(
+        user_id=int(user["id"]),
+        session_id=str(session_id),
+        session_limit=LLM_SESSION_CALL_LIMIT,
+        daily_limit=LLM_DAILY_CALL_LIMIT,
+    )
+    if not allowed:
+        st.warning(message)
+        return
+
+    record_prompt_usage(user_id=int(user["id"]), session_id=str(session_id))
+
     st.session_state.messages.append({"role": "user", "content": prompt})
+    if session_id:
+        _safe_log_chat_message(session_id=session_id, role="user", content=prompt)
     with st.spinner(""):
         result = asyncio.run(graph_step(
             build_turn_state(
@@ -843,6 +1082,15 @@ def _render_sidebar() -> None:
                 _append_assistant(f"자율도 → **Level {new} ({HITL_LEVELS[new][0]})**")
                 st.rerun()
 
+            current_user = get_current_user()
+            sid = st.session_state.get("session_id")
+            if current_user and sid:
+                sess_count, day_count = get_prompt_usage(int(current_user["id"]), str(sid))
+                st.caption(
+                    f"호출 사용량 — 세션 {sess_count}/{LLM_SESSION_CALL_LIMIT}, "
+                    f"일일 {day_count}/{LLM_DAILY_CALL_LIMIT}"
+                )
+
         # 세션 기록
         st.divider()
         st.markdown("**세션 기록**")
@@ -858,6 +1106,11 @@ def _render_sidebar() -> None:
                 lvl = s.get("hitl_level", 2)
                 st.caption(f"자율도: L{lvl} {HITL_LEVELS.get(lvl,('',))[0]}")
                 if s.get("summary"): st.caption(s["summary"][:80])
+                previews = _session_chat_preview(s.get("session_id", ""))
+                if previews:
+                    st.caption("최근 대화")
+                    for line in previews:
+                        st.caption(f"- {line}")
 
 
 def _reset_session() -> None:
@@ -887,6 +1140,7 @@ def main() -> None:
     _render_sidebar()
     _render_chat_top_header()
     _render_starter_prompts()
+    _render_downloads_panel()
 
     # 채팅 기록 렌더링
     for m in st.session_state.messages:

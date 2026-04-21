@@ -62,6 +62,39 @@ def _append_markdown_block(session_id: str, content: str) -> None:
         logger.exception("[T-20] markdown logging failed: %s", exc)
 
 
+def log_chat_message(
+    session_id: str,
+    role: str,
+    content: str,
+    *,
+    title: str | None = None,
+) -> None:
+    """
+    사용자/어시스턴트 대화를 trace.md에 남긴다.
+    """
+    timestamp = _now_text()
+    label = title or ("USER" if role == "user" else "ASSISTANT" if role == "assistant" else role.upper())
+
+    md = []
+    md.append(f"\n## [{timestamp}] CHAT — {label}\n")
+    md.append("- 내용\n")
+    md.append("```text\n")
+    md.append(content)
+    md.append("\n```\n")
+
+    _append_markdown_block(session_id, "".join(md))
+
+    try:
+        _store.log_event(
+            session_id=session_id,
+            event_type="chat_message",
+            event_name=label,
+            output_payload={"role": role, "content": content},
+        )
+    except Exception as exc:
+        logger.exception("[T-20] chat logging failed: %s", exc)
+
+
 def log_tool_call(
     session_id: str,
     tool_name: str,

@@ -14,12 +14,14 @@ def generate_report(session_id: str, analysis_result: dict[str, Any], output_for
     report_dir = SESSION_DIR / session_id / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    ext = "pdf" if output_format == "pdf" else "docx"
+    ext = "pdf" if output_format == "pdf" else "md" if output_format == "md" else "docx"
     output_path = report_dir / f"analysis_report_{datetime.now().strftime('%H%M%S')}.{ext}"
 
     try:
         if output_format == "pdf":
             _build_pdf(output_path, analysis_result)
+        elif output_format == "md":
+            _build_md(output_path, analysis_result)
         else:
             _build_docx(output_path, analysis_result)
         return {"success": True, "report_path": str(output_path), "error": None}
@@ -195,3 +197,50 @@ def _build_pdf(output_path: Path, data: dict[str, Any]) -> None:
                 story.append(Spacer(1, 6))
 
     doc.build(story)
+
+
+def _build_md(output_path: Path, data: dict[str, Any]) -> None:
+    """Markdown 보고서 생성."""
+    lines: list[str] = []
+    lines.append("# E_LENS 이커머스 분석 보고서")
+    lines.append(f"- 생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append("")
+
+    if summary := data.get("summary"):
+        lines.append("## 분석 요약")
+        lines.append(str(summary))
+        lines.append("")
+
+    if insights := data.get("insights"):
+        lines.append("## 핵심 인사이트")
+        for ins in insights:
+            lines.append(f"- {ins}")
+        lines.append("")
+
+    if actions := data.get("actions"):
+        lines.append("## 액션 아이템")
+        for act in actions:
+            lines.append(f"- {act}")
+        lines.append("")
+
+    if kpi := data.get("kpi_result"):
+        lines.append("## KPI 결과")
+        for k, v in kpi.items():
+            lines.append(f"- {k}: {round(v, 4) if isinstance(v, float) else v}")
+        lines.append("")
+
+    if ranking := data.get("feature_ranking"):
+        lines.append("## 주요 변수 (상위 5)")
+        for i, (feat, score) in enumerate(list(ranking.items())[:5], 1):
+            lines.append(f"{i}. {feat}: {score}")
+        lines.append("")
+
+    if image_paths := data.get("image_paths"):
+        lines.append("## 시각화")
+        for img_path in image_paths:
+            p = Path(str(img_path))
+            if p.is_file():
+                lines.append(f"- {p.name}")
+        lines.append("")
+
+    output_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
