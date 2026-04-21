@@ -21,7 +21,9 @@ def _get_secret_or_env(key: str, default: str = "") -> str:
             if hasattr(st, "secrets") and key in st.secrets:
                 value = st.secrets[key]
                 if value is not None:
-                    return str(value)
+                    text = str(value).strip()
+                    if text:
+                        return text
         except Exception:
             pass
     return os.getenv(key, default)
@@ -81,6 +83,18 @@ MCP_SERVER_URL = _get_secret_or_env("MCP_SERVER_URL", "http://127.0.0.1:8000/sse
 
 # ── 데이터 기본값 ────────────────────────────────────────────────────
 DEFAULT_TARGET_COL = "TARGET"
+
+
+def _to_int(value: str, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return default
+
+
+# ── LLM 호출 제한 ────────────────────────────────────────────────────
+LLM_SESSION_CALL_LIMIT = _to_int(_get_secret_or_env("LLM_SESSION_CALL_LIMIT", "30"), 30)
+LLM_DAILY_CALL_LIMIT   = _to_int(_get_secret_or_env("LLM_DAILY_CALL_LIMIT", "120"), 120)
 
 # ── LangSmith ────────────────────────────────────────────────────────
 os.environ["LANGCHAIN_API_KEY"]    = _get_secret_or_env("LANGCHAIN_API_KEY", "")

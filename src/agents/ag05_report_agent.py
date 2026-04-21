@@ -4,11 +4,13 @@ AG-05 보고서 생성 에이전트
 지원 포맷:
   docx — Word 문서 (python-docx)
   pdf  — PDF 문서 (reportlab)
+    md   — Markdown 문서
 
 사용자가 포맷 선택 가능:
   "보고서 만들어줘"         → 포맷 선택 프롬프트
   "word로 보고서 만들어줘"  → docx
   "pdf로 보고서 만들어줘"   → pdf
+    "md로 보고서 만들어줘"    → md
 """
 from __future__ import annotations
 import re
@@ -89,7 +91,7 @@ def _detect_format(user_input: str, plan: dict) -> str:
     """
     # 실행 계획에 포맷이 명시된 경우
     plan_format = plan.get("params", {}).get("AG-05", {}).get("format", "")
-    if plan_format in ("docx", "pdf", "csv"):
+    if plan_format in ("docx", "pdf", "csv", "md"):
         return plan_format
 
     q = user_input.lower()
@@ -101,6 +103,10 @@ def _detect_format(user_input: str, plan: dict) -> str:
     # Word/docx 키워드
     if any(k in q for k in ("word", "워드", "docx", "doc", "문서")):
         return "docx"
+
+    # Markdown 키워드
+    if any(k in q for k in ("md", "마크다운", "markdown")):
+        return "md"
 
     # 기본값
     return "docx"

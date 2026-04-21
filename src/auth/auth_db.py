@@ -52,10 +52,20 @@ def init_db() -> None:
                 role        TEXT,
                 purpose     TEXT,
                 hitl_level  INTEGER DEFAULT 2,
+                prompt_count INTEGER DEFAULT 0,
                 status      TEXT    DEFAULT 'running',
                 summary     TEXT,
                 created_at  TEXT    NOT NULL,
                 updated_at  TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS user_daily_usage (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                usage_date  TEXT    NOT NULL,
+                prompt_count INTEGER NOT NULL DEFAULT 0,
+                updated_at  TEXT    NOT NULL,
+                UNIQUE(user_id, usage_date)
             );
 
             CREATE TABLE IF NOT EXISTS signup_requests (
@@ -74,6 +84,7 @@ def init_db() -> None:
         _ensure_column(conn, "users", "login_id", "TEXT")
         _ensure_column(conn, "signup_requests", "login_id", "TEXT")
         _ensure_column(conn, "signup_requests", "password_hash", "TEXT")
+        _ensure_column(conn, "user_sessions", "prompt_count", "INTEGER DEFAULT 0")
 
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_id ON users(login_id)"
@@ -267,6 +278,83 @@ def get_all_sessions() -> list[dict]:
             ORDER BY s.created_at DESC
         """).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_prompt_usage(user_id: int, session_id: str) -> tuple[int, int]:
+    """(현재 세션 호출수, 오늘 사용자 호출수) 반환."""
+    today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+    with _get_conn() as conn:
+        sess_row = conn.execute(
+            "SELECT prompt_count FROM user_sessions WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
+        ).fetchone()
+        day_row = conn.execute(
+            "SELECT prompt_count FROM user_daily_usage WHERE user_id = ? AND usage_date = ?",
+            (user_id, today),
+        ).fetchone()
+
+    session_count = int(sess_row["prompt_count"]) if sess_row and sess_row["prompt_count"] is not None else 0
+    daily_count = int(day_row["prompt_count"]) if day_row and day_row["prompt_count"] is not None else 0
+    return session_count, daily_count
+
+
+def check_prompt_limit(
+    user_id: int,
+    session_id: str,
+    *,
+    session_limit: int,
+    daily_limit: int,
+) -> tuple[bool, str, int, int]:
+    """
+    제한 체크.
+    반환: (허용여부, 메시지, session_count, daily_count)
+    """
+    session_count, daily_count = get_prompt_usage(user_id, session_id)
+
+    if session_limit > 0 and session_count >= session_limit:
+        return (
+            False,
+            f"세션당 호출 제한({session_limit}회)에 도달했습니다.",
+            session_count,
+            daily_count,
+        )
+
+    if daily_limit > 0 and daily_count >= daily_limit:
+        return (
+            False,
+            f"사용자 일일 호출 제한({daily_limit}회)에 도달했습니다.",
+            session_count,
+            daily_count,
+        )
+
+    return True, "", session_count, daily_count
+
+
+def record_prompt_usage(user_id: int, session_id: str) -> tuple[int, int]:
+    """호출 1회 기록 후 (세션 호출수, 일일 호출수) 반환."""
+    now = _now()
+    today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE user_sessions SET prompt_count = COALESCE(prompt_count, 0) + 1, updated_at = ? WHERE user_id = ? AND session_id = ?",
+            (now, user_id, session_id),
+        )
+
+        conn.execute(
+            """
+            INSERT INTO user_daily_usage (user_id, usage_date, prompt_count, updated_at)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT(user_id, usage_date)
+            DO UPDATE SET
+                prompt_count = user_daily_usage.prompt_count + 1,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, today, now),
+        )
+        conn.commit()
+
+    return get_prompt_usage(user_id, session_id)
 
 
 # ── 가입 요청 CRUD ──────────────────────────────────────────────────

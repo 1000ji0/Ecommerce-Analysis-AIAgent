@@ -437,7 +437,7 @@ def _generate_response(
         response     = llm.invoke([SystemMessage(content=system), HumanMessage(content=msg)])
         resp_content = response.content if isinstance(response.content, str) else str(response.content)
         return resp_content.strip()
-    except Exception:
+    except Exception as exc:
         # Gemini API 오류가 나도 최소한의 요약은 반환
         fallback_lines = []
         for agent_id, result in agent_results.items():
@@ -452,4 +452,7 @@ def _generate_response(
 
         if fallback_lines:
             return "\n".join(fallback_lines)
-        return "현재 LLM 응답을 불러오지 못했습니다. 다시 시도해 주세요."
+        return (
+            "현재 LLM 응답을 불러오지 못했습니다. 다시 시도해 주세요. "
+            f"(원인 힌트: {type(exc).__name__})"
+        )
