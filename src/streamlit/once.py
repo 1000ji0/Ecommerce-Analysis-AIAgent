@@ -104,20 +104,24 @@ def _inject_css() -> None:
 
     /* 채팅 입력 */
     [data-testid="stChatInput"] {
-        background: var(--card) !important;
+        background: #f8fafc !important;
         border: 1.5px solid var(--card-bd) !important;
         border-radius: 14px !important;
         box-shadow: 0 8px 24px rgba(4,10,22,0.36) !important;
     }
-    [data-testid="stChatInput"] textarea {
+    [data-testid="stChatInput"] textarea,
+    [data-testid="stChatInput"] input {
         background: transparent !important;
         border: none !important;
-        color: var(--ink) !important;
+        color: #111827 !important;
         font-size: 0.95rem !important;
         line-height: 1.45 !important;
+        caret-color: #111827 !important;
     }
-    [data-testid="stChatInput"] textarea::placeholder {
-        color: #8ea3bb !important;
+    [data-testid="stChatInput"] textarea::placeholder,
+    [data-testid="stChatInput"] input::placeholder {
+        color: #475569 !important;
+        opacity: 1 !important;
     }
     [data-testid="stChatInput"]:focus-within {
         border-color: #06b6d4 !important;
@@ -325,29 +329,42 @@ def _inject_css() -> None:
         background: #06b6d4 !important;
     }
 
-    /* 채팅 메시지 영역 — 흰색 배경 */
+    /* 채팅 메시지 영역 — 어두운 배경이면 흰색 글씨 */
     [data-testid="stChatMessage"] {
         background: var(--card) !important;
         border-radius: 14px !important;
         border: 1px solid var(--card-bd) !important;
-        color: #0f172a !important;
+        color: #f8fafc !important;
         margin-bottom: 10px !important;
         box-shadow: 0 10px 22px rgba(4,10,22,0.32) !important;
     }
     [data-testid="stChatMessage"] p,
     [data-testid="stChatMessage"] span,
     [data-testid="stChatMessage"] div {
-        color: #0f172a !important;
+        color: #f8fafc !important;
         line-height: 1.5 !important;
     }
     [data-testid="stChatMessage"] *,
     [data-testid="stChatMessageContent"] *,
     [data-testid="stChatMessage"] a {
-        color: #0f172a !important;
+        color: #f8fafc !important;
     }
     [data-testid="stChatMessage"][data-testid*="user"] {
         background: var(--card-soft) !important;
         border-color: #386aa2 !important;
+    }
+    [data-testid="stChatMessage"][data-testid*="user"] *,
+    [data-testid="stChatMessage"][data-testid*="assistant"] * {
+        color: #f8fafc !important;
+    }
+
+    /* 밝은 표면에서는 검정 글씨 */
+    [data-testid="stButton"] button,
+    [data-testid="stFileUploader"],
+    [data-testid="stSelectSlider"],
+    [data-testid="stTextInput"],
+    [data-testid="stTextArea"] {
+        color: #111827 !important;
     }
     /* 메인 채팅 배경을 밝게 */
     [data-testid="stMain"] > div {
