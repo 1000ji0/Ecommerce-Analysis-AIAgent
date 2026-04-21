@@ -597,6 +597,7 @@ def _init() -> None:
         "messages": [], "session_id": None, "graph_config": None,
         "data_meta": None, "user_profile": None, "agent_results": {},
         "pending_hitl": False, "hitl_value": None,
+        "pending_report_prompt": None,
         # 온보딩 상태
         "onboard_step": 0,      # 0=대기, 1=파일, 2=직군, 3=목적, 4=자율도, 5=완료
         "onboard_file": None,
@@ -993,7 +994,64 @@ def _render_hitl() -> None:
     st.rerun()
 
 
-def _run_prompt(prompt: str) -> None:
+def _is_report_request(text: str) -> bool:
+    q = (text or "").lower()
+    return any(k in q for k in ("보고서", "리포트", "report"))
+
+
+def _detect_report_format(text: str) -> str | None:
+    q = (text or "").lower()
+    if any(k in q for k in ("pdf", "피디에프")):
+        return "pdf"
+    if any(k in q for k in ("md", "markdown", "마크다운")):
+        return "md"
+    if any(k in q for k in ("word", "docx", "doc", "워드", "문서")):
+        return "docx"
+    return None
+
+
+def _append_user_message_once(prompt: str) -> bool:
+    """같은 프롬프트 중복 append 방지."""
+    messages = st.session_state.get("messages") or []
+    if messages:
+        last = messages[-1]
+        if last.get("role") == "user" and str(last.get("content", "")).strip() == prompt.strip():
+            return False
+
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    session_id = st.session_state.get("session_id")
+    if session_id:
+        _safe_log_chat_message(session_id=session_id, role="user", content=prompt)
+    return True
+
+
+def _render_report_format_hitl() -> None:
+    pending_prompt = st.session_state.get("pending_report_prompt")
+    if not pending_prompt:
+        return
+
+    with st.chat_message("assistant", avatar="🔭"):
+        st.markdown("**보고서를 다운로드하려면 파일 형식을 선택해주세요.**")
+        with st.form("report_format_form"):
+            selected = st.radio(
+                "어떤 파일 형식으로 다운로드 받으시겠어요?",
+                options=["pdf", "md", "docx"],
+                format_func=lambda x: {"pdf": "PDF", "md": "Markdown (.md)", "docx": "Word (.docx)"}[x],
+                horizontal=True,
+            )
+            submitted = st.form_submit_button("이 형식으로 보고서 생성", use_container_width=True)
+
+    if not submitted:
+        return
+
+    st.session_state.pending_report_prompt = None
+    format_hint = {"pdf": "pdf", "md": "md", "docx": "word"}[selected]
+    composed_prompt = f"{pending_prompt}\n\n{format_hint} 형식으로 보고서 생성해줘"
+    _run_prompt(composed_prompt, add_user_message=False)
+    st.rerun()
+
+
+def _run_prompt(prompt: str, *, add_user_message: bool = True) -> None:
     user = get_current_user()
     if not user:
         st.warning("로그인 정보를 확인할 수 없어 요청을 실행할 수 없습니다.")
@@ -1003,6 +1061,9 @@ def _run_prompt(prompt: str) -> None:
     if not session_id:
         st.warning("세션 정보가 없어 요청을 실행할 수 없습니다.")
         return
+
+    if add_user_message:
+        _append_user_message_once(prompt)
 
     allowed, message, _, _ = check_prompt_limit(
         user_id=int(user["id"]),
@@ -1016,9 +1077,6 @@ def _run_prompt(prompt: str) -> None:
 
     record_prompt_usage(user_id=int(user["id"]), session_id=str(session_id))
 
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    if session_id:
-        _safe_log_chat_message(session_id=session_id, role="user", content=prompt)
     with st.chat_message("assistant", avatar="🔭"):
         with st.spinner("⏳ 추론 중입니다... 잠시만 기다려주세요"):
             result = asyncio.run(graph_step(
@@ -1118,6 +1176,7 @@ def _render_sidebar() -> None:
 def _reset_session() -> None:
     for k in ("session_id", "graph_config", "data_meta", "user_profile",
               "pending_hitl", "hitl_value",
+              "pending_report_prompt",
               "onboard_file", "onboard_role", "onboard_purpose"):
         st.session_state[k] = None
     st.session_state.agent_results = {}
@@ -1160,12 +1219,19 @@ def main() -> None:
     elif not _session_ready():
         # 온보딩 플로우
         _render_onboarding()
+    elif st.session_state.get("pending_report_prompt"):
+        _render_report_format_hitl()
     else:
         # 채팅 입력
         if prompt := st.chat_input("무엇을 분석할까요?"):
             with st.chat_message("user"):
                 st.markdown(prompt)
-            _run_prompt(prompt)
+            requested_format = _detect_report_format(prompt)
+            if _is_report_request(prompt) and requested_format is None:
+                _append_user_message_once(prompt)
+                st.session_state.pending_report_prompt = prompt
+            else:
+                _run_prompt(prompt, add_user_message=False)
             st.rerun()
 
 
