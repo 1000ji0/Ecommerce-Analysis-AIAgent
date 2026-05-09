@@ -17,25 +17,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-from config import GEMINI_MODEL, GOOGLE_API_KEY
 from state import GraphState
 from tools.output.t20_trace_logger import log_tool_call, log_final_response
 from tools.database.sqlite_store import TraceStore
 
 _store = TraceStore()
-_llm   = None
 
 
+from llm_factory import get_llm
 def _get_llm():
-    global _llm
-    if _llm is None:
-        _llm = ChatGoogleGenerativeAI(
-            model=GEMINI_MODEL,
-            google_api_key=GOOGLE_API_KEY,
-        )
-    return _llm
+    return get_llm()
+
+# Optional SLLM/RAG HTTP fallback
+try:
+    from sllm_client import query_sllm
+except Exception:
+    query_sllm = None
 
 
 def _fallback_intent(user_input: str) -> dict:
@@ -191,20 +188,61 @@ def orchestrator_respond_node(state: GraphState) -> dict[str, Any]:
     user_input    = state.get("user_input", "")
     agent_results = state.get("agent_results", {})
     user_profile  = state.get("user_profile", {})
+    t0 = time.time()
 
-    t0       = time.time()
+    # 기존 로컬 LLM 기반 응답 생성
     response = _generate_response(user_input, agent_results, user_profile)
-    log_final_response(session_id=session_id, response=response)
+
+    # SLLM/RAG 서버로 보강 응답 시도 (존재하면 호출)
+    sllm_text = None
+    try:
+        if query_sllm is not None:
+            # 간단한 컨텍스트 요약 생성
+            def _summarize_results(results: dict) -> str:
+                parts = []
+                for aid, r in results.items():
+                    if not r or "error" in r:
+                        continue
+                    if isinstance(r, dict):
+                        # pick known summary fields
+                        for k in ("react_answer", "insights", "summary", "final_ranking"):
+                            if k in r:
+                                parts.append(f"{aid}:{k}={str(r[k])[:500]}")
+                                break
+                return "\n".join(parts)[:4000]
+
+            ctx = _summarize_results(agent_results)
+            sllm_payload = f"사용자 요청: {user_input}\n\n분석 결과:\n{ctx}"
+            sllm_resp = query_sllm(sllm_payload, session_id=session_id)
+            if isinstance(sllm_resp, dict):
+                for key in ("answer", "response", "content", "final_response", "text"):
+                    if key in sllm_resp:
+                        sllm_text = sllm_resp[key] if isinstance(sllm_resp[key], str) else str(sllm_resp[key])
+                        break
+                if sllm_text is None:
+                    import json
+                    sllm_text = json.dumps(sllm_resp, ensure_ascii=False)
+            else:
+                sllm_text = str(sllm_resp)
+    except Exception:
+        sllm_text = None
+
+    # 병합 전략: 로컬 응답 + 외부 SLLM 보강(있다면)
+    final_resp = response
+    if sllm_text:
+        final_resp = f"{response}\n\n[외부 지식 보강]\n{sllm_text}"
+
+    log_final_response(session_id=session_id, response=final_resp)
     log_tool_call(
         session_id=session_id,
         tool_name="AG-01_respond",
-        params={"user_input": user_input},
-        result={"response_length": len(response)},
+        params={"user_input": user_input, "sllm_used": bool(sllm_text)},
+        result={"response_length": len(final_resp)},
         latency_ms=int((time.time() - t0) * 1000),
     )
 
     return {
-        "final_response": response,
+        "final_response": final_resp,
         "next_agent":     "respond",
     }
 
@@ -449,9 +487,26 @@ def _generate_response(
                 fallback_lines.append(f"보고서가 생성되었습니다: {result['report_path']}")
             elif agent_id == "AG-03" and result.get("kpi_result"):
                 fallback_lines.append(f"KPI 결과: {result['kpi_result']}")
-
         if fallback_lines:
             return "\n".join(fallback_lines)
+
+        # 마지막 수단: 로컬 SLLM/RAG 서버에 직접 질의 시도
+        if query_sllm is not None:
+            try:
+                sllm_resp = query_sllm(msg)
+                # try to extract common fields
+                if isinstance(sllm_resp, dict):
+                    for key in ("answer", "response", "content", "final_response", "text"):
+                        if key in sllm_resp:
+                            val = sllm_resp[key]
+                            return val if isinstance(val, str) else str(val)
+                    # fallback: return JSON string
+                    import json
+                    return json.dumps(sllm_resp, ensure_ascii=False)
+                return str(sllm_resp)
+            except Exception:
+                pass
+
         return (
             "현재 LLM 응답을 불러오지 못했습니다. 다시 시도해 주세요. "
             f"(원인 힌트: {type(exc).__name__})"

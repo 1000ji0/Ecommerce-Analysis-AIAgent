@@ -760,6 +760,35 @@ def _render_downloads_panel() -> None:
             )
 
 
+def _render_report_download_cta() -> None:
+    """보고서 생성 시 채팅 하단에 즉시 보이는 다운로드 버튼."""
+    if not _session_ready():
+        return
+
+    ag05 = (st.session_state.get("agent_results") or {}).get("AG-05", {})
+    report_path_raw = ag05.get("report_path", "") if isinstance(ag05, dict) else ""
+    report_path = Path(str(report_path_raw)) if report_path_raw else None
+    if not report_path or not report_path.exists():
+        return
+
+    suffix = report_path.suffix.lower()
+    mime = {
+        ".pdf": "application/pdf",
+        ".md": "text/markdown",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }.get(suffix, "application/octet-stream")
+
+    st.markdown("**보고서 다운로드**")
+    st.download_button(
+        f"📄 {report_path.name} 다운로드",
+        data=report_path.read_bytes(),
+        file_name=report_path.name,
+        mime=mime,
+        use_container_width=True,
+        key=f"dl_report_cta_{st.session_state.get('session_id', '')}",
+    )
+
+
 def _apply_result(result: dict) -> None:
     st.session_state.agent_results = result["agent_results"]
     if result["status"] == "interrupt":
@@ -1212,6 +1241,8 @@ def main() -> None:
                 p = Path(str(ip))
                 if p.is_file():
                     st.image(str(p), caption=p.name)
+
+    _render_report_download_cta()
 
     # HITL
     if st.session_state.pending_hitl:

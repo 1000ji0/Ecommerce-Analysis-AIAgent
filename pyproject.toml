@@ -42,6 +42,10 @@ dependencies = [
     "aiofiles>=23.2.0",
     "streamlit>=1.40.0",
     "reportlab>=4.4.10",
+    "openai>=2.32.0",
+    "langchain-openai>=1.2.1",
+    "homebrew>=0.0.0.1",
+    "huggingface-hub>=1.8.0",
 ]
 
 [project.optional-dependencies]

@@ -32,7 +32,9 @@ from tools.output.t19_visualizer import generate_chart
 from tools.output.t20_trace_logger import log_tool_call
 from tools.database.sqlite_store import TraceStore
 from llm_fallback import llm_feature_importance, llm_eda_analysis, llm_insight
+from llm_factory import get_llm
 
+_llm = get_llm()
 _store = TraceStore()
 _ctx: dict = {}
 
@@ -105,11 +107,11 @@ def eda_analysis(question: str) -> str:
     ROAS/CVR/CTR 같은 파생 변수가 필요하면 자동으로 계산해서 분석.
     """
     session_id = _ctx.get("session_id", "")
-    df         = _enrich_df(_ctx.get("df"), question) if _ctx.get("df") is not None else None
-    target_col = _ctx.get("target_col", DEFAULT_TARGET_COL)
-
-    if df is None:
+    _df        = _ctx.get("df")
+    if _df is None:
         return "데이터가 로드되지 않았습니다."
+    df         = _enrich_df(_df, question)
+    target_col = _ctx.get("target_col", DEFAULT_TARGET_COL)
 
     t0 = time.time()
     try:
@@ -178,11 +180,11 @@ def generate_insight_tool(question: str) -> str:
     EDA나 변수 중요도 분석 결과를 종합해서 실행 가능한 인사이트 도출.
     """
     session_id = _ctx.get("session_id", "")
-    df         = _enrich_df(_ctx.get("df"), question) if _ctx.get("df") is not None else None
-    target_col = _ctx.get("target_col", DEFAULT_TARGET_COL)
-
-    if df is None:
+    _df        = _ctx.get("df")
+    if _df is None:
         return "데이터가 로드되지 않았습니다."
+    df         = _enrich_df(_df, question)
+    target_col = _ctx.get("target_col", DEFAULT_TARGET_COL)
 
     t0 = time.time()
     try:
@@ -216,11 +218,11 @@ def create_visualization(chart_type: str = "auto", question: str = "") -> str:
     """
     session_id = _ctx.get("session_id", "")
     q          = question or chart_type
-    df         = _enrich_df(_ctx.get("df"), q) if _ctx.get("df") is not None else None
-    target_col = _ctx.get("target_col", DEFAULT_TARGET_COL)
-
-    if df is None:
+    _df        = _ctx.get("df")
+    if _df is None:
         return json.dumps({"success": False, "error": "데이터 없음"})
+    df         = _enrich_df(_df, q)
+    target_col = _ctx.get("target_col", DEFAULT_TARGET_COL)
 
     derived = [c for c in df.columns if c not in _ctx["df"].columns]
     if derived:
@@ -295,15 +297,10 @@ tool 선택 기준:
 
 
 def _build_react_agent():
-    llm = ChatGoogleGenerativeAI(
-        model=GEMINI_MODEL,
-        google_api_key=GOOGLE_API_KEY,
-    )
     return create_react_agent(
-        model=llm,
+        model=get_llm(),
         tools=REACT_TOOLS,
         prompt=REACT_SYSTEM,
-        max_iterations=10,   # 복잡한 분석도 여러 단계 가능
     )
 
 

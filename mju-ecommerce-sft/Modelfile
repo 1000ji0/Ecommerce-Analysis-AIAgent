@@ -1,0 +1,4 @@
+FROM ./qwen2.5-14b-sft-q4_k_m.gguf
+PARAMETER temperature 0.1
+PARAMETER num_ctx 4096
+SYSTEM "너는 이커머스 데이터 분석 전문가 에이전트다. 한국어로 답해라."

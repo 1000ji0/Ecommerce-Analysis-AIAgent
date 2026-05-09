@@ -71,8 +71,13 @@ def get_session_output_dir(session_id: str) -> Path:
 
 
 # ── LLM 설정 ─────────────────────────────────────────────────────────
+LLM_MODEL_NAME = _get_secret_or_env("LLM_MODEL_NAME", "mju-ecommerce-sft")
+LLM_BASE_URL   = _get_secret_or_env("LLM_BASE_URL", "http://localhost:11434/v1")
+LLM_API_KEY    = _get_secret_or_env("LLM_API_KEY", "ollama")
+
+# ── Google Gemini 설정 (Fallback/HITL용) ────────────────────────────────
+GEMINI_MODEL   = _get_secret_or_env("GEMINI_MODEL", "gemini-1.5-flash")
 GOOGLE_API_KEY = _get_secret_or_env("GOOGLE_API_KEY", "")
-GEMINI_MODEL   = "gemini-2.5-flash"
 
 # AG-03 SQL 에이전트용 비즈니스 DB (오케스트레이터 플랜에 db_url이 없을 때 대체)
 # 예: sqlite:////absolute/path/to/app.db  또는 mysql+pymysql://user:pass@host/db
